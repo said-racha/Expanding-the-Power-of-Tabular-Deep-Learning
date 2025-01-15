@@ -6,12 +6,13 @@ from torch.utils.tensorboard import SummaryWriter
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from copy import deepcopy
 
 
 
 
 class LinearBE(nn.Module): # BatchEnsemble layer
-    def __init__(self, dim_in:int, dim_out:int, k=32):
+    def __init__(self, dim_in:int, dim_out:int, k=32, initR="random"):
         super().__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
@@ -21,10 +22,17 @@ class LinearBE(nn.Module): # BatchEnsemble layer
         self.S = nn.Parameter(torch.Tensor(k, dim_out))
         self.B = nn.Parameter(torch.Tensor(k, dim_out))
 
-        # "ri and si are randomly initialized with ±1 to ensure diversity of the k linear layers" (l.171-172)
-        nn.init.uniform_(self.R, -1, 1)
-        nn.init.uniform_(self.S, -1, 1)
+        if initR == "random": # TabM naive
+            # "randomly initialized with ±1 to ensure diversity of the k linear layers" (l.171-172)
+            nn.init.uniform_(self.R, -1, 1)
 
+        elif initR == "ones": # TabM
+            nn.init.ones_(self.R)
+        
+        else:
+            raise ValueError("init should be 'random' or 'ones'")
+
+        nn.init.uniform_(self.S, -1, 1)
         nn.init.normal_(self.W)
         nn.init.normal_(self.B)
 
@@ -86,6 +94,45 @@ class TabM_Naive(nn.Module):
         # predictions
         preds = torch.cat([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
         return preds.mean(dim=1)
+
+
+class TabM(nn.Module):
+    def __init__(self, layers_shapes:list, k=32):
+        super().__init__()
+
+        self.k = k
+
+        self.layers = torch.nn.ModuleList([LinearBE(layers_shapes[0], layers_shapes[1], k, initR="ones"),
+                                          torch.nn.ReLU(),
+                                          torch.nn.Dropout(0.1)])
+
+        for i in range(1,len(layers_shapes)-1):
+            self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k))
+            self.layers.append(torch.nn.ReLU())
+            self.layers.append(torch.nn.Dropout(0.1))
+        
+        self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-1], 1) for _ in range(k)])
+
+    
+    def forward(self, x):
+        X = x.unsqueeze(1).repeat(1, self.k, 1)
+
+        for layer in self.layers:
+            X = layer(X)
+        
+        # predictions
+        preds = torch.cat([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
+        return preds.mean(dim=1)
+
+
+class MLP_k(nn.Module):
+    def __init__(self, MLP, k=32):
+        super().__init__()
+        self.k = k
+        self.MLPs = nn.ModuleList([deepcopy(MLP) for _ in range(k)])
+    
+    def forward(self, x):
+        return torch.cat([MLP(x) for MLP in self.MLPs], dim=1).mean(dim=1)
 
 
 
@@ -160,6 +207,11 @@ test_loader = DataLoader(list(zip(X_test, y_test)), batch_size=BATCH_SIZE, shuff
 
 
 tabM_naive = TabM_Naive([X_train.shape[1], 64, 32, 16])
+tabM = TabM([X_train.shape[1], 64, 32, 16])
 simple_MLP = nn.Sequential(nn.Linear(X_train.shape[1], 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 16), nn.ReLU(), nn.Linear(16, 1))
-train_cancer(tabM_naive, train_loader, test_loader, 'runs/tabM_naive_breast_cancer')
+MLP_k = MLP_k(simple_MLP)
+
+train_cancer(tabM_naive, train_loader, test_loader, 'runs/tabM_naive')
 train_cancer(simple_MLP, train_loader, test_loader, 'runs/MLP')
+train_cancer(tabM, train_loader, test_loader, 'runs/tabM')
+train_cancer(MLP_k, train_loader, test_loader, 'runs/MLP_k')
