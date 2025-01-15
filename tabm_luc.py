@@ -121,35 +121,6 @@ class MLPk_layer(nn.Module):
         return f"in_features={self.dim_in}, out_features={self.dim_out}"
 
 
-class MLP_layer_mini(nn.Module):
-    def __init__(self, dim_in: int, dim_out: int):
-        super().__init__()
-        self.dim_in = dim_in
-        self.dim_out = dim_out
-
-        self.W = nn.Parameter(torch.rand((dim_in, dim_out)))
-        self.B = nn.Parameter(torch.rand((1, dim_out)))
-
-    def forward(self, X):
-        """
-        Shapes:
-
-        X: (batch_size, k, dim_in)
-        W: (dim_in, dim_out)
-        B: (1, dim_out)
-        output: (batch_size, k, dim_out)
-        """
-        print(f"X: {X.shape}, W: {self.W.shape}")
-
-        output = torch.einsum("bki,io->bko", X, self.W)
-        output = output + self.B
-
-        return output
-
-    def extra_repr(self):
-        return f"in_features={self.dim_in}, out_features={self.dim_out}"
-
-
 # ===== BACKBONES =====
 
 
@@ -169,6 +140,25 @@ class TabM_naive(nn.Module):
 
     def forward(self, X):
         return self.layers(X)
+
+
+class TabM_mini(nn.Module):
+    def __init__(self, input_size, layer_sizes, k=32):
+        super().__init__()
+
+        self.k = k
+
+        val = torch.Tensor([-1, 1])
+        self.R = nn.Parameter(val[torch.randint(2, (k, input_size))])
+
+        layers = [MLP_layer(input_size, layer_sizes[0]),
+                  *[MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)]]
+
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, X):
+        output = X * self.R
+        return self.layers(output)
 
 
 class TabM(nn.Module):
