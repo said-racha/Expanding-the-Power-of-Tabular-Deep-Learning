@@ -238,7 +238,7 @@ class EnsembleModel(nn.Module):
         # pass through prediction heads
         preds = [head(X[:, i]) for i, head in enumerate(self.pred_heads)]
 
-        return torch.cat(preds, dim=1)
+        return torch.cat(preds, dim=1).mean(dim=1)
 
 
 # ===== TEST =====
@@ -261,7 +261,7 @@ def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLo
         train_total = 0
 
         for x, y in train_loader:
-            preds = net(x).mean(dim=1)
+            preds = net(x)
             loss = criterion(preds, y)
             losses.append(loss)
 
@@ -285,7 +285,7 @@ def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLo
             test_total = 0
 
             for x, y in test_loader:
-                preds = net(x).mean(dim=1)
+                preds = net(x)
                 loss = criterion(preds, y)
                 test_losses.append(loss)
 
