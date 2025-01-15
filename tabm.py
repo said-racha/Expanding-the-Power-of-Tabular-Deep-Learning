@@ -65,6 +65,7 @@ class TabM_Naive(nn.Module):
         for i in range(len(layers_shapes)-1):
             self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k))
             self.layers.append(torch.nn.ReLU())
+            self.layers.append(torch.nn.Dropout(0.1))
         
         # "fully non-shared prediction heads" (l.201)
         self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-1], 1) for _ in range(k)])
@@ -96,7 +97,7 @@ BATCH_SIZE = 32
 
 def train_cancer(net, train_loader, test_loader, log_dir, criterion = nn.BCEWithLogitsLoss(), lr = 1e-3, nb_iter = 50):
 
-    optim = torch.optim.Adam(net.parameters(), lr=lr)
+    optim = torch.optim.AdamW(net.parameters(), lr=lr)
     writer = SummaryWriter(log_dir=log_dir)
     
     for epoch in tqdm(range(nb_iter)):
