@@ -130,7 +130,7 @@ class MLPk_layer(nn.Module):
 
 
 class TabM_naive(nn.Module):
-    def __init__(self, in_features: int, hidden_sizes: int, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32, dropout_rate=0.1):
         super().__init__()
 
         self.in_features = in_features
@@ -139,7 +139,7 @@ class TabM_naive(nn.Module):
 
         layer_sizes = [in_features] + hidden_sizes
 
-        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k) for i in range(len(layer_sizes)-1)]
+        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k, dropout_rate) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
@@ -148,17 +148,16 @@ class TabM_naive(nn.Module):
 
 
 class TabM_mini(nn.Module):
-    def __init__(self, in_features: int, hidden_sizes: int, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32, dropout_rate=0.1):
         super().__init__()
 
         self.k = k
 
-        self.R = nn.Parameter(torch.zeros((k, in_features)))
-        nn.init.uniform_(self.R, -1, 1)
+        self.R = nn.Parameter(torch.randn(k, in_features))
 
         layer_sizes = [in_features] + hidden_sizes
 
-        layers = [MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)]
+        layers = [MLP_layer(layer_sizes[i], layer_sizes[i+1], dropout_rate) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
@@ -168,14 +167,14 @@ class TabM_mini(nn.Module):
 
 
 class TabM(nn.Module):
-    def __init__(self, in_features: int, hidden_sizes: int, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32, dropout_rate=0.1):
         super().__init__()
 
         self.k = k
 
         layer_sizes = [in_features] + hidden_sizes
 
-        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k, initialize_to_1=True) for i in range(len(layer_sizes)-1)]
+        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k, dropout_rate, initialize_to_1=True) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
@@ -184,12 +183,12 @@ class TabM(nn.Module):
 
 
 class MLPk(nn.Module):
-    def __init__(self, in_features: int, hidden_sizes: int, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32, dropout_rate=0.1):
         super().__init__()
 
         layer_sizes = [in_features] + hidden_sizes
 
-        layers = [MLPk_layer(layer_sizes[i], layer_sizes[i+1], k) for i in range(len(layer_sizes)-1)]
+        layers = [MLPk_layer(layer_sizes[i], layer_sizes[i+1], k, dropout_rate) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
@@ -204,22 +203,22 @@ class MLP(nn.Module):
     Simple MLP model
     """
 
-    def __init__(self, in_features: int, hidden_sizes: int, out_features: int):
+    def __init__(self, in_features: int, hidden_sizes: int, out_features: int, dropout_rate=0.1):
         super().__init__()
-        
+
         self.in_features = in_features
         self.out_features = out_features
 
         layer_sizes = [in_features] + hidden_sizes + [out_features]
 
-        layers = [*[MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)],
+        layers = [*[MLP_layer(layer_sizes[i], layer_sizes[i+1], dropout_rate) for i in range(len(layer_sizes)-1)],
                   nn.Linear(layer_sizes[-1], out_features)
                   ]
 
         self.layers = nn.Sequential(*layers)
 
     def forward(self, X: torch.Tensor):
-        return self.layers(X).reshape(-1) # Temp
+        return self.layers(X)
 
 
 class EnsembleModel(nn.Module):
@@ -231,12 +230,14 @@ class EnsembleModel(nn.Module):
     - passes the output through k prediction heads, mean over heads (batch, out_features)
     """
 
-    def __init__(self, backbone: nn.Module, in_features: int, hidden_sizes: int, out_features: int, k=32):
+    def __init__(self, backbone: nn.Module, in_features: int, hidden_sizes: int, out_features: int, k=32, dropout_rate=0.1, mean_over_heads=True):
         super().__init__()
 
-        self.backbone = backbone(in_features, hidden_sizes, k)
+        self.backbone = backbone(in_features, hidden_sizes, k, dropout_rate)
         self.in_features = in_features
         self.k = k
+
+        self.mean_over_heads = mean_over_heads
 
         self.pred_heads = nn.ModuleList([nn.Linear(hidden_sizes[-1], out_features) for _ in range(k)])
 
@@ -250,7 +251,13 @@ class EnsembleModel(nn.Module):
         # pass through prediction heads
         preds = [head(X[:, i]) for i, head in enumerate(self.pred_heads)]
 
-        return torch.cat(preds, dim=1).mean(dim=1)
+        # concatenate head predictions
+        preds = torch.stack(preds, dim=1)
+
+        if self.mean_over_heads:
+            preds = preds.mean(dim=1)
+
+        return preds
 
 
 # ===== TEST =====
@@ -260,7 +267,7 @@ class EnsembleModel(nn.Module):
 BATCH_SIZE = 25
 
 
-def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLogitsLoss(), lr=1e-3, nb_iter=50):
+def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLogitsLoss(), lr=1e-3, nb_iter=10):
 
     optim = torch.optim.Adam(net.parameters(), lr=lr)
     writer = SummaryWriter(log_dir=log_dir)
@@ -273,6 +280,7 @@ def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLo
         train_total = 0
 
         for x, y in train_loader:
+            y = y.reshape(-1, 1)
             preds = net(x)
             loss = criterion(preds, y)
             losses.append(loss)
@@ -297,6 +305,7 @@ def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLo
             test_total = 0
 
             for x, y in test_loader:
+                y = y.reshape(-1, 1)
                 preds = net(x)
                 loss = criterion(preds, y)
                 test_losses.append(loss)
@@ -323,11 +332,11 @@ test_loader = DataLoader(list(zip(X_test, y_test)), batch_size=BATCH_SIZE, shuff
 
 
 layers = [64, 32, 16]
-tabM_naive = EnsembleModel(TabM_naive, X_train.shape[1], layers, 1)
-simple_MLP = MLP(X_train.shape[1], layers, 1)
-tabM_mini = EnsembleModel(TabM_mini, X_train.shape[1], layers, 1)
-tabM = EnsembleModel(TabM, X_train.shape[1], layers, 1)
-mlpk = EnsembleModel(MLPk, X_train.shape[1], layers, 1)
+tabM_naive = EnsembleModel(TabM_naive, X_train.shape[1], layers, 1, dropout_rate=0)
+simple_MLP = MLP(X_train.shape[1], layers, 1, dropout_rate=0)
+tabM_mini = EnsembleModel(TabM_mini, X_train.shape[1], layers, 1, dropout_rate=0)
+tabM = EnsembleModel(TabM, X_train.shape[1], layers, 1, dropout_rate=0)
+mlpk = EnsembleModel(MLPk, X_train.shape[1], layers, 1, dropout_rate=0)
 
 
 # print(tabM_naive)
