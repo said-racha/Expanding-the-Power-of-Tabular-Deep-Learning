@@ -262,7 +262,7 @@ class EnsembleModel(nn.Module):
 
 # ===== TEST =====
 
-if __name__ == "main":
+if __name__ == "__main__":
 
     # Training
 
@@ -343,8 +343,8 @@ if __name__ == "main":
 
     # print(tabM_naive)
 
-    train_cancer(tabM_naive, train_loader, test_loader, 'runs/TabM_naive')
-    train_cancer(simple_MLP, train_loader, test_loader, 'runs/MLP')
-    train_cancer(tabM_mini, train_loader, test_loader, 'runs/TabM_mini')
-    train_cancer(tabM, train_loader, test_loader, 'runs/TabM')
-    train_cancer(mlpk, train_loader, test_loader, 'runs/MLPk')
+    train_cancer(tabM_naive, train_loader, test_loader, 'runs/cancer/TabM_naive')
+    train_cancer(simple_MLP, train_loader, test_loader, 'runs/cancer/MLP')
+    train_cancer(tabM_mini, train_loader, test_loader, 'runs/cancer/TabM_mini')
+    train_cancer(tabM, train_loader, test_loader, 'runs/cancer/TabM')
+    train_cancer(mlpk, train_loader, test_loader, 'runs/cancer/MLPk')
