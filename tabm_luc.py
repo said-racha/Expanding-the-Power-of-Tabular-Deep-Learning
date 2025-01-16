@@ -13,37 +13,40 @@ from sklearn.preprocessing import StandardScaler
 # ===== LAYERS =====
 
 class linear_BE(nn.Module):
-    def __init__(self, dim_in: int, dim_out: int, k=32, dropout_rate=0.1, initialize_to_1=False):
+    def __init__(self, in_features: int, out_features: int, k=32, dropout_rate=0.1, initialize_to_1=False):
         super().__init__()
-        self.dim_in = dim_in
-        self.dim_out = dim_out
+        self.in_features = in_features
+        self.out_features = out_features
         self.k = k
 
         if initialize_to_1:  # For TabM
-            self.R = nn.Parameter(torch.ones(k, dim_in))
-            self.S = nn.Parameter(torch.ones(k, dim_out))
+            self.R = nn.Parameter(torch.ones(k, in_features))
+            self.S = nn.Parameter(torch.ones(k, out_features))
         else:
             # Paper generates randomly with +-1
-            val = torch.Tensor([-1, 1])
-            self.R = nn.Parameter(val[torch.randint(2, (k, dim_in))])
-            self.S = nn.Parameter(val[torch.randint(2, (k, dim_out))])
+            self.R = nn.Parameter(torch.zeros((k, in_features)))
+            nn.init.uniform_(self.R, -1, 1)
+            self.S = nn.Parameter(torch.zeros((k, out_features)))
+            nn.init.uniform_(self.S, -1, 1)
 
-        self.W = nn.Parameter(torch.rand((dim_in, dim_out)))
-        self.B = nn.Parameter(torch.rand((k, dim_out)))
+        self.W = nn.Parameter(torch.zeros((in_features, out_features)))
+        nn.init.uniform_(self.W, -1, 1)
+        self.B = nn.Parameter(torch.zeros((k, out_features)))
+        nn.init.uniform_(self.B, -1, 1)
 
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         """
         Shapes:
 
-        X: (batch_size, k, dim_in)
-        R: (k, dim_in)
-        W: (dim_in, dim_out)
-        S: (k, dim_out)
-        B: (k, dim_out)
-        output: (batch_size, k, dim_out)
+        X: (batch_size, k, in_features)
+        R: (k, in_features)
+        W: (in_features, out_features)
+        S: (k, out_features)
+        B: (k, out_features)
+        output: (batch_size, k, out_features)
 
         Formula:
         output = ( (X * R) W) * S + B
@@ -61,20 +64,20 @@ class linear_BE(nn.Module):
         """
         Adds information about the layer to its string representation (useful when printing the model)
         """
-        return f"in_features={self.dim_in}, out_features={self.dim_out}"
+        return f"in_features={self.in_features}, out_features={self.out_features}"
 
 
 class MLP_layer(nn.Module):
-    def __init__(self, dim_in: int, dim_out: int, dropout_rate=0.1):
+    def __init__(self, in_features: int, out_features: int, dropout_rate=0.1):
         super().__init__()
-        self.dim_in = dim_in
-        self.dim_out = dim_out
+        self.in_features = in_features
+        self.out_features = out_features
 
-        self.linear = nn.Linear(dim_in, dim_out)
+        self.linear = nn.Linear(in_features, out_features)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         output = self.linear(X)
         output = self.relu(output)
         output = self.dropout(output)
@@ -82,29 +85,31 @@ class MLP_layer(nn.Module):
         return output
 
     def extra_repr(self):
-        return f"in_features={self.dim_in}, out_features={self.dim_out}"
+        return f"in_features={self.in_features}, out_features={self.out_features}"
 
 
 class MLPk_layer(nn.Module):
-    def __init__(self, dim_in: int, dim_out: int, k=32, dropout_rate=0.1):
+    def __init__(self, in_features: int, out_features: int, k=32, dropout_rate=0.1):
         super().__init__()
-        self.dim_in = dim_in
-        self.dim_out = dim_out
+        self.in_features = in_features
+        self.out_features = out_features
 
-        self.W = nn.Parameter(torch.rand((k, dim_in, dim_out)))
-        self.B = nn.Parameter(torch.rand((k, dim_out)))
+        self.W = nn.Parameter(torch.zeros((k, in_features, out_features)))
+        nn.init.uniform_(self.W, -1, 1)
+        self.B = nn.Parameter(torch.zeros((k, out_features)))
+        nn.init.uniform_(self.B, -1, 1)
 
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout_rate)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         """
         Shapes:
 
-        X: (batch_size, k, dim_in)
-        W: (k, dim_in, dim_out)
-        B: (k, dim_out)
-        output: (batch_size, k, dim_out)
+        X: (batch_size, k, in_features)
+        W: (k, in_features, out_features)
+        B: (k, out_features)
+        output: (batch_size, k, out_features)
 
         Formula:
         output = X @ W + B
@@ -118,76 +123,77 @@ class MLPk_layer(nn.Module):
         return output
 
     def extra_repr(self):
-        return f"in_features={self.dim_in}, out_features={self.dim_out}"
+        return f"in_features={self.in_features}, out_features={self.out_features}"
 
 
 # ===== BACKBONES =====
 
 
 class TabM_naive(nn.Module):
-    def __init__(self, input_size, layer_sizes, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32):
         super().__init__()
 
-        self.input_size = input_size
-        self.layer_sizes = layer_sizes
+        self.in_features = in_features
+        self.hidden_sizes = hidden_sizes
         self.k = k
 
-        layers = [linear_BE(input_size, layer_sizes[0], k),
-                  *[linear_BE(layer_sizes[i], layer_sizes[i+1], k) for i in range(len(layer_sizes)-1)]
-                  ]
+        layer_sizes = [in_features] + hidden_sizes
+
+        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         return self.layers(X)
 
 
 class TabM_mini(nn.Module):
-    def __init__(self, input_size, layer_sizes, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32):
         super().__init__()
 
         self.k = k
 
-        val = torch.Tensor([-1, 1])
-        self.R = nn.Parameter(val[torch.randint(2, (k, input_size))])
+        self.R = nn.Parameter(torch.zeros((k, in_features)))
+        nn.init.uniform_(self.R, -1, 1)
 
-        layers = [MLP_layer(input_size, layer_sizes[0]),
-                  *[MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)]]
+        layer_sizes = [in_features] + hidden_sizes
+
+        layers = [MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         output = X * self.R
         return self.layers(output)
 
 
 class TabM(nn.Module):
-    def __init__(self, input_size, layer_sizes, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32):
         super().__init__()
 
         self.k = k
 
-        layers = [linear_BE(input_size, layer_sizes[0], k),
-                  *[linear_BE(layer_sizes[i], layer_sizes[i+1], k, initialize_to_1=True) for i in range(len(layer_sizes)-1)]
-                  ]
+        layer_sizes = [in_features] + hidden_sizes
+
+        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k, initialize_to_1=True) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         return self.layers(X)
 
 
 class MLPk(nn.Module):
-    def __init__(self, input_size, layer_sizes, k=32):
+    def __init__(self, in_features: int, hidden_sizes: int, k=32):
         super().__init__()
 
-        layers = [MLPk_layer(input_size, layer_sizes[0], k),
-                  *[MLPk_layer(layer_sizes[i], layer_sizes[i+1], k) for i in range(len(layer_sizes)-1)]
-                  ]
+        layer_sizes = [in_features] + hidden_sizes
+
+        layers = [MLPk_layer(layer_sizes[i], layer_sizes[i+1], k) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         return self.layers(X)
 
 # ===== MODELS =====
@@ -197,38 +203,44 @@ class MLP(nn.Module):
     """
     Simple MLP model
     """
-    def __init__(self, input_size, layer_sizes, output_size):
-        super().__init__()
 
-        layers = [MLP_layer(input_size, layer_sizes[0]),
-                  *[MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)],
-                  nn.Linear(layer_sizes[-1], output_size)
+    def __init__(self, in_features: int, hidden_sizes: int, out_features: int):
+        super().__init__()
+        
+        self.in_features = in_features
+        self.out_features = out_features
+
+        layer_sizes = [in_features] + hidden_sizes + [out_features]
+
+        layers = [*[MLP_layer(layer_sizes[i], layer_sizes[i+1]) for i in range(len(layer_sizes)-1)],
+                  nn.Linear(layer_sizes[-1], out_features)
                   ]
 
         self.layers = nn.Sequential(*layers)
 
-    def forward(self, X):
-        return self.layers(X)
+    def forward(self, X: torch.Tensor):
+        return self.layers(X).reshape(-1) # Temp
 
 
 class EnsembleModel(nn.Module):
     """
     Global ensemble model that : 
-    - takes batched input (batch, dim)
-    - clones it k times (batch, k, dim)
-    - passes it through a backbone (which model you want e.g TabM, MLPk, etc.)
-    - passes the output through k prediction heads
+    - takes batched input (batch, in_features)
+    - clones it k times (batch, k, in_features)
+    - passes it through a backbone (which model you want e.g TabM, MLPk, etc.) (batch, k, hidden_sizes[-1])
+    - passes the output through k prediction heads, mean over heads (batch, out_features)
     """
-    def __init__(self, backbone: nn.Module, input_size, layer_sizes, output_size, k=32):
+
+    def __init__(self, backbone: nn.Module, in_features: int, hidden_sizes: int, out_features: int, k=32):
         super().__init__()
 
-        self.backbone = backbone(input_size, layer_sizes, k)
-        self.input_size = input_size
+        self.backbone = backbone(in_features, hidden_sizes, k)
+        self.in_features = in_features
         self.k = k
 
-        self.pred_heads = nn.ModuleList([nn.Linear(layer_sizes[-1], output_size) for _ in range(k)])
+        self.pred_heads = nn.ModuleList([nn.Linear(hidden_sizes[-1], out_features) for _ in range(k)])
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor):
         # clone X to shape (batch, k, dim)
         X = X.unsqueeze(1).repeat(1, self.k, 1)
 
@@ -318,7 +330,7 @@ tabM = EnsembleModel(TabM, X_train.shape[1], layers, 1)
 mlpk = EnsembleModel(MLPk, X_train.shape[1], layers, 1)
 
 
-# print(tabM_mini)
+# print(tabM_naive)
 
 train_cancer(tabM_naive, train_loader, test_loader, 'runs/TabM_naive')
 train_cancer(simple_MLP, train_loader, test_loader, 'runs/MLP')
