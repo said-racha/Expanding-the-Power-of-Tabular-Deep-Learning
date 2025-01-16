@@ -111,37 +111,41 @@ def train_model(net, train_loader, test_loader, log_dir, criterion=RMSELoss(), l
 
         writer.add_scalar("Loss/test", np.mean(test_losses), epoch)
 
-# Dataset
-data = fetch_california_housing()
-X, y = data.data, data.target
 
-scaler = StandardScaler()
-X = scaler.fit_transform(X)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42 )
+if __name__ == "__main__":
+    # Dataset
+    data = fetch_california_housing()
+    X, y = data.data, data.target
 
-X_train = torch.tensor(X_train, dtype=torch.float32)
-X_test = torch.tensor(X_test, dtype=torch.float32)
-y_train = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
-y_test = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
 
-train_dataset = TensorDataset(X_train, y_train)
-test_dataset = TensorDataset(X_test, y_test)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42 )
 
-BATCH_SIZE = 256
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    X_train = torch.tensor(X_train, dtype=torch.float32)
+    X_test = torch.tensor(X_test, dtype=torch.float32)
+    y_train = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
+    y_test = torch.tensor(y_test, dtype=torch.float32).view(-1, 1)
 
-# Initialisations
-input_dim = X_train.shape[1]
-hidden_dim = 128
-output_dim = 1
-k = 4
+    train_dataset = TensorDataset(X_train, y_train)
+    test_dataset = TensorDataset(X_test, y_test)
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-tabM = TabM(input_dim, hidden_dim, output_dim, k)
-simple_mlp = SimpleMLP(input_dim, hidden_dim, output_dim)
+    BATCH_SIZE = 256
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-# Train et Eval des modèles
-train_model(tabM, train_loader, test_loader, "runs/TabM_California")
-train_model(simple_mlp, train_loader, test_loader, "runs/MLP_California")
+    # Initialisations
+    input_dim = X_train.shape[1]
+    hidden_dim = 128
+    output_dim = 1
+    k = 4
+
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tabM = TabM(input_dim, hidden_dim, output_dim, k)
+    simple_mlp = SimpleMLP(input_dim, hidden_dim, output_dim)
+
+    # Train et Eval des modèles
+    train_model(tabM, train_loader, test_loader, "runs/TabM_California")
+    train_model(simple_mlp, train_loader, test_loader, "runs/MLP_California")
+

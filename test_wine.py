@@ -110,6 +110,7 @@ if __name__ == "__main__":
     
     hidden_sizes = [64, 64]
     
+    
     # ===== Luc =====
     
     mlp = luc.MLP(13, hidden_sizes, 3, dropout_rate=0).to(device)
@@ -134,13 +135,13 @@ if __name__ == "__main__":
     
     # ===== Raphaël =====
     
-    # mlp = nn.Sequential(nn.Linear(13, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 3)).to(device)
-    # mlpk = raph.MLP_k(mlp).to(device)
-    # tabM_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
-    # tabM = raph.TabM([13, 64, 32, 16, 3]).to(device)
+    mlp = nn.Sequential(nn.Linear(13, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 3)).to(device)
+    mlpk = raph.MLP_k(mlp).to(device)
+    tabM_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
+    tabM = raph.TabM([13, 64, 32, 16, 3]).to(device)
     
-    # train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/raph/MLP", device)
-    # train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/MLPk", device)
-    # train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device)
-    # train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
+    train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/raph/MLP", device)
+    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/MLPk", device)
+    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device)
+    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
     
