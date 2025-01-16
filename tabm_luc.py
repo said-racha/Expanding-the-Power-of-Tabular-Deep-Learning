@@ -262,87 +262,89 @@ class EnsembleModel(nn.Module):
 
 # ===== TEST =====
 
-# Training
+if __name__ == "main":
 
-BATCH_SIZE = 25
+    # Training
+
+    BATCH_SIZE = 25
 
 
-def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLogitsLoss(), lr=1e-3, nb_iter=10):
+    def train_cancer(net, train_loader, test_loader, log_dir, criterion=nn.BCEWithLogitsLoss(), lr=1e-3, nb_iter=10):
 
-    optim = torch.optim.Adam(net.parameters(), lr=lr)
-    writer = SummaryWriter(log_dir=log_dir)
+        optim = torch.optim.Adam(net.parameters(), lr=lr)
+        writer = SummaryWriter(log_dir=log_dir)
 
-    for epoch in tqdm(range(nb_iter)):
+        for epoch in tqdm(range(nb_iter)):
 
-        net.train()
-        losses = []
-        train_correct = 0
-        train_total = 0
+            net.train()
+            losses = []
+            train_correct = 0
+            train_total = 0
 
-        for x, y in train_loader:
-            y = y.reshape(-1, 1)
-            preds = net(x)
-            loss = criterion(preds, y)
-            losses.append(loss)
-
-            # Compute accuracy
-            preds_binary = (torch.sigmoid(preds) > 0.5).int()
-            train_correct += (preds_binary == y).sum()
-            train_total += y.size(0)
-
-            optim.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 1)
-            optim.step()
-
-        writer.add_scalar("Loss/train", torch.tensor(losses).mean(), epoch)
-        writer.add_scalar("Accuracy/train", train_correct / train_total, epoch)
-
-        net.eval()
-        with torch.no_grad():
-            test_losses = []
-            test_correct = 0
-            test_total = 0
-
-            for x, y in test_loader:
+            for x, y in train_loader:
                 y = y.reshape(-1, 1)
                 preds = net(x)
                 loss = criterion(preds, y)
-                test_losses.append(loss)
+                losses.append(loss)
 
                 # Compute accuracy
                 preds_binary = (torch.sigmoid(preds) > 0.5).int()
-                test_correct += (preds_binary == y).sum()
-                test_total += y.size(0)
+                train_correct += (preds_binary == y).sum()
+                train_total += y.size(0)
 
-            writer.add_scalar("Loss/test", torch.tensor(test_losses).mean(), epoch)
-            writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
+                optim.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1)
+                optim.step()
+
+            writer.add_scalar("Loss/train", torch.tensor(losses).mean(), epoch)
+            writer.add_scalar("Accuracy/train", train_correct / train_total, epoch)
+
+            net.eval()
+            with torch.no_grad():
+                test_losses = []
+                test_correct = 0
+                test_total = 0
+
+                for x, y in test_loader:
+                    y = y.reshape(-1, 1)
+                    preds = net(x)
+                    loss = criterion(preds, y)
+                    test_losses.append(loss)
+
+                    # Compute accuracy
+                    preds_binary = (torch.sigmoid(preds) > 0.5).int()
+                    test_correct += (preds_binary == y).sum()
+                    test_total += y.size(0)
+
+                writer.add_scalar("Loss/test", torch.tensor(test_losses).mean(), epoch)
+                writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
 
 
-# Classification : `breast_cancer`
-data = load_breast_cancer()
-X_train, X_test, y_train, y_test = train_test_split(data.data, data.target, test_size=0.2, random_state=42)
-scaler = StandardScaler()
-X_train = torch.tensor(scaler.fit_transform(X_train), dtype=torch.float32)
-X_test = torch.tensor(scaler.transform(X_test), dtype=torch.float32)
-y_train = torch.tensor(y_train, dtype=torch.float32)
-y_test = torch.tensor(y_test, dtype=torch.float32)
-train_loader = DataLoader(list(zip(X_train, y_train)), batch_size=BATCH_SIZE, shuffle=True)
-test_loader = DataLoader(list(zip(X_test, y_test)), batch_size=BATCH_SIZE, shuffle=False)
+    # Classification : `breast_cancer`
+    data = load_breast_cancer()
+    X_train, X_test, y_train, y_test = train_test_split(data.data, data.target, test_size=0.2, random_state=42)
+    scaler = StandardScaler()
+    X_train = torch.tensor(scaler.fit_transform(X_train), dtype=torch.float32)
+    X_test = torch.tensor(scaler.transform(X_test), dtype=torch.float32)
+    y_train = torch.tensor(y_train, dtype=torch.float32)
+    y_test = torch.tensor(y_test, dtype=torch.float32)
+    train_loader = DataLoader(list(zip(X_train, y_train)), batch_size=BATCH_SIZE, shuffle=True)
+    test_loader = DataLoader(list(zip(X_test, y_test)), batch_size=BATCH_SIZE, shuffle=False)
 
 
-layers = [64, 32, 16]
-tabM_naive = EnsembleModel(TabM_naive, X_train.shape[1], layers, 1, dropout_rate=0)
-simple_MLP = MLP(X_train.shape[1], layers, 1, dropout_rate=0)
-tabM_mini = EnsembleModel(TabM_mini, X_train.shape[1], layers, 1, dropout_rate=0)
-tabM = EnsembleModel(TabM, X_train.shape[1], layers, 1, dropout_rate=0)
-mlpk = EnsembleModel(MLPk, X_train.shape[1], layers, 1, dropout_rate=0)
+    layers = [64, 32, 16]
+    tabM_naive = EnsembleModel(TabM_naive, X_train.shape[1], layers, 1, dropout_rate=0)
+    simple_MLP = MLP(X_train.shape[1], layers, 1, dropout_rate=0)
+    tabM_mini = EnsembleModel(TabM_mini, X_train.shape[1], layers, 1, dropout_rate=0)
+    tabM = EnsembleModel(TabM, X_train.shape[1], layers, 1, dropout_rate=0)
+    mlpk = EnsembleModel(MLPk, X_train.shape[1], layers, 1, dropout_rate=0)
 
 
-# print(tabM_naive)
+    # print(tabM_naive)
 
-train_cancer(tabM_naive, train_loader, test_loader, 'runs/TabM_naive')
-train_cancer(simple_MLP, train_loader, test_loader, 'runs/MLP')
-train_cancer(tabM_mini, train_loader, test_loader, 'runs/TabM_mini')
-train_cancer(tabM, train_loader, test_loader, 'runs/TabM')
-train_cancer(mlpk, train_loader, test_loader, 'runs/MLPk')
+    train_cancer(tabM_naive, train_loader, test_loader, 'runs/TabM_naive')
+    train_cancer(simple_MLP, train_loader, test_loader, 'runs/MLP')
+    train_cancer(tabM_mini, train_loader, test_loader, 'runs/TabM_mini')
+    train_cancer(tabM, train_loader, test_loader, 'runs/TabM')
+    train_cancer(mlpk, train_loader, test_loader, 'runs/MLPk')
