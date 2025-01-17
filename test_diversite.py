@@ -2,6 +2,7 @@ import torch
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch.nn as nn
 
 def compute_correlation(preds):
     """
@@ -24,7 +25,7 @@ def compute_correlation(preds):
 
 
 
-def plot_predictions_distribution(preds):
+def plot_predictions_distribution(preds,titre=""):
     """
     Visualise la distribution des prédictions des sous-modèles (boxplots).
     Args:
@@ -34,7 +35,10 @@ def plot_predictions_distribution(preds):
     
     plt.figure(figsize=(10, 6))
     sns.boxplot(data=preds_mean.T)
-    plt.title(f"Distribution des prédictions des sous-modèles")
+    if titre=="":
+        plt.title("Distribution des prédictions des sous-modèles")
+    else:
+        plt.title("Distribution des prédictions des sous-modèles (" + titre + ")")
     plt.xlabel("Sous-modèles")
     plt.ylabel("Valeurs de prédiction")
     plt.show()
@@ -67,6 +71,7 @@ def compute_kl_divergence(preds):
 if __name__ == "__main__":
 
     import tabm_raph as raph
+    import tabm_luc as luc
     from test_wine import get_wine_data
     from test_wine import train_multiclass_classification
 
@@ -79,26 +84,48 @@ if __name__ == "__main__":
 
 
     # modèle
-    model = raph.TabM([13, 64, 32, 16, 3]).to(device)
+    tabm = raph.TabM([13, 64, 32, 16, 3]).to(device)
+    tabm_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
+    mlpk = luc.EnsembleModel(luc.MLPk, 13, [64, 32, 16], 3, dropout_rate=0)
+
+
 
     # entraînement
-    BATCH_SIZE = 128
+    BATCH_SIZE = 200
     train_loader, test_loader = get_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42)
-    train_multiclass_classification(model, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
+    train_multiclass_classification(tabm, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
+    train_multiclass_classification(tabm_naive, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
+    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
+
 
     # données test
-    model.mean_over_heads = False
+    tabm.mean_over_heads = False
+    tabm_naive.mean_over_heads = False
+    mlpk.mean_over_heads = False
     X_test = next(iter(test_loader))[0].to(device) # les tests sont effectués sur le premier batch
-    preds = model(X_test)
+    preds_tabm = tabm(X_test)
+    preds_tabm_naive = tabm_naive(X_test)
+    preds_mlpk = mlpk(X_test)
 
     # Corrélations
-    spearman_corr = compute_correlation(preds)
-    print(f"Corrélation Spearman moyenne : {spearman_corr:.4f}")
+    spearman_tabm = compute_correlation(preds_tabm)
+    spearman_tabm_naive = compute_correlation(preds_tabm_naive)
+    spearman_mlpk = compute_correlation(preds_mlpk)
+    print(f"Corrélation Spearman moyenne (TabM) : {spearman_tabm:.4f}")
+    print(f"Corrélation Spearman moyenne (TabM Naive) : {spearman_tabm_naive:.4f}")
+    print(f'Corrélation Spearman moyenne (MLP_k) : {spearman_mlpk:.4f}')
 
     # Visualisation
-    plot_predictions_distribution(preds)
+    plot_predictions_distribution(preds_tabm,"TabM")
+    plot_predictions_distribution(preds_tabm_naive, "TabM Naive")
+    plot_predictions_distribution(preds_mlpk, "MLP_k")
+
 
     # KL-Divergence
-    kl_divergence = compute_kl_divergence(preds)
-    print(f"KL-Divergence moyenne : {kl_divergence:.4f}")
+    kl_tabm = compute_kl_divergence(preds_tabm)
+    kl_tabm_naive = compute_kl_divergence(preds_tabm_naive)
+    kl_mlpk = compute_kl_divergence(preds_mlpk)
+    print(f"KL-Divergence moyenne (TabM): {kl_tabm:.4f}")
+    print(f"KL-Divergence moyenne (TabM Naive): {kl_tabm_naive:.4f}")
+    print(f"KL-Divergence moyenne (MLP_k): {kl_mlpk:.4f}")
 
