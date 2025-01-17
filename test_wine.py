@@ -12,7 +12,7 @@ import tabm_racha as racha
 import tabm_raph as raph
 
 
-def train_multiclass_classification(net, train_loader, test_loader, log_dir, device, criterion=nn.CrossEntropyLoss(), lr=1e-3, nb_iter=20):
+def train_multiclass_classification(net, train_loader, test_loader, log_dir, device, criterion=nn.CrossEntropyLoss(), lr=1e-3, nb_iter=20, verbose=True):
     optim = torch.optim.AdamW(net.parameters(), lr=lr)
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -41,8 +41,9 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
             loss.backward()
             optim.step()
 
-        writer.add_scalar("Loss/train", torch.tensor(losses).mean(), epoch)
-        writer.add_scalar("Accuracy/train", train_correct / train_total, epoch)
+        if verbose:
+            writer.add_scalar("Loss/train", torch.tensor(losses).mean(), epoch)
+            writer.add_scalar("Accuracy/train", train_correct / train_total, epoch)
 
         net.eval()
         with torch.no_grad():
@@ -63,8 +64,9 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
                 test_correct += (preds_classes == y).sum()
                 test_total += y.size(0)
 
-            writer.add_scalar("Loss/test", torch.tensor(test_losses).mean(), epoch)
-            writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
+            if verbose:
+                writer.add_scalar("Loss/test", torch.tensor(test_losses).mean(), epoch)
+                writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
             
             
 def get_wine_data(split=.2, batch_size=32, seed=42):

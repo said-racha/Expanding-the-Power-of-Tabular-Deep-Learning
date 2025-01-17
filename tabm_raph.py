@@ -7,7 +7,7 @@ from copy import deepcopy
 
 
 class LinearBE(nn.Module): # BatchEnsemble layer
-    def __init__(self, dim_in:int, dim_out:int, k=32, initR="random"):
+    def __init__(self, dim_in:int, dim_out:int, k=32, initR="uniform"):
         super().__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
@@ -17,17 +17,22 @@ class LinearBE(nn.Module): # BatchEnsemble layer
         self.S = nn.Parameter(torch.Tensor(k, dim_out))
         self.B = nn.Parameter(torch.Tensor(k, dim_out))
 
-        if initR == "random": # TabM naive
+        if initR == "uniform": # TabM naive
             # "randomly initialized with ±1 to ensure diversity of the k linear layers" (l.171-172)
             nn.init.uniform_(self.R, -1, 1)
+            nn.init.uniform_(self.S, -1, 1)
 
         elif initR == "ones": # TabM
             nn.init.ones_(self.R)
+            nn.init.normal_(self.S)
+        
+        elif initR == "normal":
+            nn.init.normal_(self.S)
+            nn.init.normal_(self.R)
         
         else:
-            raise ValueError("init should be 'random' or 'ones'")
+            raise ValueError("init should be 'uniform', 'normal' or 'ones'")
 
-        nn.init.uniform_(self.S, -1, 1)
         nn.init.normal_(self.W)
         nn.init.normal_(self.B)
 
@@ -57,7 +62,7 @@ class LinearBE(nn.Module): # BatchEnsemble layer
 
 
 class TabM_Naive(nn.Module):
-    def __init__(self, layers_shapes:list, k=32):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True):
         super().__init__()
 
         self.k = k
@@ -72,6 +77,7 @@ class TabM_Naive(nn.Module):
         
         # "fully non-shared prediction heads" (l.201)
         self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-2], layers_shapes[-1]) for _ in range(k)])
+        self.mean_over_heads = mean_over_heads
 
     
     def forward(self, x):
@@ -88,11 +94,14 @@ class TabM_Naive(nn.Module):
         
         # predictions
         preds = torch.stack([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
-        return preds.mean(dim=1)
+
+        if self.mean_over_heads:
+            return preds.mean(dim=1)
+        return preds
 
 
 class TabM(nn.Module):
-    def __init__(self, layers_shapes:list, k=32):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True):
         super().__init__()
 
         self.k = k
@@ -107,6 +116,7 @@ class TabM(nn.Module):
             self.layers.append(torch.nn.Dropout(0.1))
         
         self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-2], layers_shapes[-1]) for _ in range(k)])
+        self.mean_over_heads = mean_over_heads
 
     
     def forward(self, x):
@@ -117,16 +127,23 @@ class TabM(nn.Module):
         
         # predictions
         preds = torch.stack([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
-        return preds.mean(dim=1)
+        
+        if self.mean_over_heads:
+            return preds.mean(dim=1)
+        return preds
 
 
 class MLP_k(nn.Module):
-    def __init__(self, MLP, k=32):
+    def __init__(self, MLP, k=32, mean_over_heads = True):
         super().__init__()
         self.k = k
         self.MLPs = nn.ModuleList([deepcopy(MLP) for _ in range(k)])
+        self.mean_over_heads = mean_over_heads
     
     def forward(self, x):
-        return torch.stack([MLP(x) for MLP in self.MLPs], dim=1).mean(dim=1)
+        preds = torch.stack([MLP(x) for MLP in self.MLPs], dim=1)
+        if self.mean_over_heads:
+            return preds.mean(dim=1)
+        return preds
 
 
