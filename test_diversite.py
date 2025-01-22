@@ -3,6 +3,9 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch.nn as nn
+import pandas as pd
+from sklearn.manifold import TSNE
+
 
 
 def compute_correlation(preds):
@@ -11,7 +14,6 @@ def compute_correlation(preds):
     spearman_corrs = []
 
     for i in range(batch_size):
-        # Flatten predictions pour comparer les modèles entre eux
         preds_i = preds[i].detach().cpu().numpy()
         spearman_corr = stats.spearmanr(preds_i).statistic
         spearman_corrs.append(spearman_corr)
@@ -53,6 +55,28 @@ def compute_kl_divergence(preds):
     return torch.tensor(kl_divergences).mean()
 
 
+
+def visualize_tsne(intermediates, title="t-SNE Visualization"):
+
+    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
+
+    plt.figure(figsize=(8, 6))
+    colors = plt.cm.viridis(torch.linspace(0, 1, len(intermediates)))        
+
+    for i, (layer, color) in enumerate(zip(intermediates, colors)):
+        outputs = layer.reshape(-1, layer.size(-1)).detach().cpu().numpy()
+        reduced_outputs = tsne.fit_transform(outputs)
+
+        plt.scatter(reduced_outputs[:, 0], reduced_outputs[:, 1], label=f'Layer {i+1}', alpha=0.7, color=color)
+        
+    
+    plt.title(title)
+    plt.legend()
+    plt.xlabel("t-SNE Component 1")
+    plt.ylabel("t-SNE Component 2")
+    plt.show()
+
+
 if __name__ == "__main__":
 
     import tabm_raph as raph
@@ -92,10 +116,13 @@ if __name__ == "__main__":
     
 
     X_test = []
+    Y_test = []
     for inputs, labels in test_loader:  # Itérez sur le DataLoader pour récupérer toutes les données
         X_test.append(inputs)
+        Y_test.append(labels)
     X_test = torch.cat(X_test, dim=0).to(device)
-
+    Y_test = torch.cat(Y_test, dim=0).to(device)
+    
     
     preds_tabm = tabM(X_test)
     preds_tabm_naive = tabM_naive(X_test)
@@ -145,17 +172,31 @@ if __name__ == "__main__":
 
             train_multiclass_classification(model, train_loader, test_loader, f"runs/wine/{dist}_{scale}", device)
             model.mean_over_heads = False
-            preds = model(X_test)
-            spearman = compute_correlation(preds)
-            kl_divergence = compute_kl_divergence(preds)
+            preds_k = model(X_test)
+            preds_mean = preds_k.mean(dim=1)
+
+            spearman = compute_correlation(preds_k)
+            preds_classes = torch.argmax(preds_mean, dim=1)
+            accuracy = (preds_classes == Y_test).float().mean()
 
             results.append({
                 'scale': scale,
                 'distribution': dist,
-                'spearman': spearman.item()
+                'spearman': spearman.item(),
+                'accuracy': accuracy.item()
             })
-
-    import pandas as pd
+    
     df = pd.DataFrame(results)
     print(df)
+    
 
+
+
+
+    # visualisation des sorties des couches intermédiaires/cachées
+
+    model = raph.TabM([13, 64, 32, 16, 3])
+    train_multiclass_classification(model, train_loader, test_loader, f"runs/wine/hidden", device, verbose=False)
+    model.intermediaire = True
+    intermediaires = model(X_test)
+    visualize_tsne(intermediaires, title=f"TabM t-SNE")

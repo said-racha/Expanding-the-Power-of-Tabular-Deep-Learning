@@ -70,10 +70,11 @@ class LinearBE(nn.Module): # BatchEnsemble layer
 
 
 class TabM_Naive(nn.Module):
-    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0, intermediaire=False):
         super().__init__()
 
         self.k = k
+        self.intermediaire = intermediaire
 
         self.layers = torch.nn.ModuleList()
 
@@ -97,22 +98,31 @@ class TabM_Naive(nn.Module):
         """
         X = x.unsqueeze(1).repeat(1, self.k, 1)
 
+        intermediaire = []
+
         for layer in self.layers:
             X = layer(X)
+
+            if (isinstance(layer, LinearBE) or isinstance(layer, nn.Linear)) and self.intermediaire:
+                intermediaire.append(X)
+        
+        if intermediaire:
+            return intermediaire
         
         # predictions
         preds = torch.stack([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
-
+        
         if self.mean_over_heads:
             return preds.mean(dim=1)
         return preds
 
 
 class TabM(nn.Module):
-    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0, intermediaire=False):
         super().__init__()
 
         self.k = k
+        self.intermediaire = intermediaire
 
         self.layers = torch.nn.ModuleList([LinearBE(layers_shapes[0], layers_shapes[1], k, init="ones"),
                                           torch.nn.ReLU(),
@@ -130,8 +140,16 @@ class TabM(nn.Module):
     def forward(self, x):
         X = x.unsqueeze(1).repeat(1, self.k, 1)
 
+        intermediaire = []
+
         for layer in self.layers:
             X = layer(X)
+
+            if (isinstance(layer, LinearBE) or isinstance(layer, nn.Linear)) and self.intermediaire:
+                intermediaire.append(X)
+        
+        if intermediaire:
+            return intermediaire
         
         # predictions
         preds = torch.stack([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
