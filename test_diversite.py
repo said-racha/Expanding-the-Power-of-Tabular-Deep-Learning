@@ -4,14 +4,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch.nn as nn
 
+
 def compute_correlation(preds):
-    """
-    Calcule la corrélation (Spearman) entre les prédictions des sous-modèles pour chaque exemple.
-    Args:
-        preds (torch.Tensor): Prédictions des sous-modèles de taille (batch_size, k, output_dim).
-    Returns:
-        torch.Tensor: Corrélation moyenne sur le batch (Spearman).
-    """
+
     batch_size, _, _ = preds.size()
     spearman_corrs = []
 
@@ -26,11 +21,7 @@ def compute_correlation(preds):
 
 
 def plot_predictions_distribution(preds,titre=""):
-    """
-    Visualise la distribution des prédictions des sous-modèles (boxplots).
-    Args:
-        preds (torch.Tensor): Prédictions des sous-modèles de taille (batch_size, k, output_dim).
-    """
+
     preds_mean = preds.mean(dim=0).detach().cpu().numpy()
     
     plt.figure(figsize=(10, 6))
@@ -48,13 +39,7 @@ from scipy.special import kl_div
 import numpy as np
 
 def compute_kl_divergence(preds):
-    """
-    Calcule la KL-Divergence entre les distributions des prédictions des sous-modèles.
-    Args:
-        preds (torch.Tensor): Prédictions des sous-modèles de taille (batch_size, k, output_dim).
-    Returns:
-        float: Moyenne de la KL-Divergence sur le batch.
-    """
+
     batch_size, k, output_dim = preds.size()
     kl_divergences = np.empty((batch_size,k,output_dim))
 
@@ -82,29 +67,38 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-
-    # modèle
-    tabm = raph.TabM([13, 64, 32, 16, 3]).to(device)
-    tabm_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
-    mlpk = luc.EnsembleModel(luc.MLPk, 13, [64, 32, 16], 3, dropout_rate=0)
-
+    
+    # modèles
+    layers = [64, 32, 16]
+    tabM_naive = luc.EnsembleModel(luc.TabM_naive, 13, layers, 3, dropout_rate=0)
+    tabM_mini = luc.EnsembleModel(luc.TabM_mini, 13, layers, 3, dropout_rate=0)
+    tabM = luc.EnsembleModel(luc.TabM, 13, layers, 3, dropout_rate=0)
+    mlpk = luc.EnsembleModel(luc.MLPk, 13, layers, 3, dropout_rate=0)
+    
 
 
     # entraînement
-    BATCH_SIZE = 200
+    BATCH_SIZE = 32
     train_loader, test_loader = get_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42)
-    train_multiclass_classification(tabm, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
-    train_multiclass_classification(tabm_naive, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
-    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
-
+    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
+    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device, verbose=False)
+    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/mlpk", device, verbose=False)
+    
 
     # données test
-    tabm.mean_over_heads = False
-    tabm_naive.mean_over_heads = False
+    tabM.mean_over_heads = False
+    tabM_naive.mean_over_heads = False
     mlpk.mean_over_heads = False
-    X_test = next(iter(test_loader))[0].to(device) # les tests sont effectués sur le premier batch
-    preds_tabm = tabm(X_test)
-    preds_tabm_naive = tabm_naive(X_test)
+    
+
+    X_test = []
+    for inputs, labels in test_loader:  # Itérez sur le DataLoader pour récupérer toutes les données
+        X_test.append(inputs)
+    X_test = torch.cat(X_test, dim=0).to(device)
+
+    
+    preds_tabm = tabM(X_test)
+    preds_tabm_naive = tabM_naive(X_test)
     preds_mlpk = mlpk(X_test)
 
     # Corrélations
@@ -128,4 +122,40 @@ if __name__ == "__main__":
     print(f"KL-Divergence moyenne (TabM): {kl_tabm:.4f}")
     print(f"KL-Divergence moyenne (TabM Naive): {kl_tabm_naive:.4f}")
     print(f"KL-Divergence moyenne (MLP_k): {kl_mlpk:.4f}")
+    
+
+
+
+
+
+
+    # test des initialisations
+    perturbation_scales = [0.1, 0.5, 1.0, 2.0]
+    distributions = ['uniform', 'normal', 'laplace']
+
+    results = []
+
+    for scale in perturbation_scales:
+        for dist in distributions:
+            model = raph.TabM(
+                [13, 64, 32, 16, 3],
+                amplitude=scale,
+                init=dist
+            )
+
+            train_multiclass_classification(model, train_loader, test_loader, f"runs/wine/{dist}_{scale}", device)
+            model.mean_over_heads = False
+            preds = model(X_test)
+            spearman = compute_correlation(preds)
+            kl_divergence = compute_kl_divergence(preds)
+
+            results.append({
+                'scale': scale,
+                'distribution': dist,
+                'spearman': spearman.item()
+            })
+
+    import pandas as pd
+    df = pd.DataFrame(results)
+    print(df)
 

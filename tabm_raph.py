@@ -7,7 +7,7 @@ from copy import deepcopy
 
 
 class LinearBE(nn.Module): # BatchEnsemble layer
-    def __init__(self, dim_in:int, dim_out:int, k=32, initR="uniform"):
+    def __init__(self, dim_in:int, dim_out:int, k=32, init="uniform", amplitude_init=1.0):
         super().__init__()
         self.dim_in = dim_in
         self.dim_out = dim_out
@@ -17,21 +17,29 @@ class LinearBE(nn.Module): # BatchEnsemble layer
         self.S = nn.Parameter(torch.Tensor(k, dim_out))
         self.B = nn.Parameter(torch.Tensor(k, dim_out))
 
-        if initR == "uniform": # TabM naive
+        if init == "uniform": # TabM naive
             # "randomly initialized with ±1 to ensure diversity of the k linear layers" (l.171-172)
             nn.init.uniform_(self.R, -1, 1)
             nn.init.uniform_(self.S, -1, 1)
 
-        elif initR == "ones": # TabM
+        elif init == "ones": # TabM
             nn.init.ones_(self.R)
             nn.init.normal_(self.S)
         
-        elif initR == "normal":
+        elif init == "normal":
             nn.init.normal_(self.S)
             nn.init.normal_(self.R)
+
+        elif init == "laplace":
+            dist = torch.distributions.laplace.Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
+            self.R.data = dist.sample((k, dim_in))[:,:,0]
+            self.S.data = dist.sample((k, dim_out))[:,:,0]
         
         else:
-            raise ValueError("init should be 'uniform', 'normal' or 'ones'")
+            raise ValueError("init should be 'uniform', 'normal', 'ones' or 'laplace'")
+
+        self.R.data *= amplitude_init
+        self.S.data *= amplitude_init
 
         nn.init.normal_(self.W)
         nn.init.normal_(self.B)
@@ -62,7 +70,7 @@ class LinearBE(nn.Module): # BatchEnsemble layer
 
 
 class TabM_Naive(nn.Module):
-    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0):
         super().__init__()
 
         self.k = k
@@ -71,7 +79,7 @@ class TabM_Naive(nn.Module):
 
         # "applying BatchEnsemble to all linear layers" (l.200)
         for i in range(len(layers_shapes)-2):
-            self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k))
+            self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k, init, amplitude))
             self.layers.append(torch.nn.ReLU())
             self.layers.append(torch.nn.Dropout(0.1))
         
@@ -101,17 +109,17 @@ class TabM_Naive(nn.Module):
 
 
 class TabM(nn.Module):
-    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0):
         super().__init__()
 
         self.k = k
 
-        self.layers = torch.nn.ModuleList([LinearBE(layers_shapes[0], layers_shapes[1], k, initR="ones"),
+        self.layers = torch.nn.ModuleList([LinearBE(layers_shapes[0], layers_shapes[1], k, init="ones"),
                                           torch.nn.ReLU(),
                                           torch.nn.Dropout(0.1)])
 
         for i in range(1,len(layers_shapes)-2):
-            self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k))
+            self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k, init, amplitude))
             self.layers.append(torch.nn.ReLU())
             self.layers.append(torch.nn.Dropout(0.1))
         

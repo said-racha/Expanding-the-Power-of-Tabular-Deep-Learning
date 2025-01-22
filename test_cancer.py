@@ -10,23 +10,19 @@ from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 import tabm_raph as raph
 
-BATCH_SIZE = 32
+def get_cancer_data(split=.2, batch_size=32, seed=42):
 
-data = load_breast_cancer()
-X_train, X_test, y_train, y_test = train_test_split(data.data, data.target, test_size=0.2, random_state=42)
-scaler = StandardScaler()
-X_train = torch.tensor(scaler.fit_transform(X_train), dtype=torch.float32)
-X_test = torch.tensor(scaler.transform(X_test), dtype=torch.float32)
-y_train = torch.tensor(y_train, dtype=torch.float32)
-y_test = torch.tensor(y_test, dtype=torch.float32)
-train_loader =  DataLoader(list(zip(X_train, y_train)), batch_size=BATCH_SIZE, shuffle=True)
-test_loader = DataLoader(list(zip(X_test, y_test)), batch_size=BATCH_SIZE, shuffle=False)
+    data = load_breast_cancer()
+    X_train, X_test, y_train, y_test = train_test_split(data.data, data.target, test_size=split, random_state=seed)
+    scaler = StandardScaler()
+    X_train = torch.tensor(scaler.fit_transform(X_train), dtype=torch.float32)
+    X_test = torch.tensor(scaler.transform(X_test), dtype=torch.float32)
+    y_train = torch.tensor(y_train, dtype=torch.float32)
+    y_test = torch.tensor(y_test, dtype=torch.float32)
+    train_loader =  DataLoader(list(zip(X_train, y_train)), batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(list(zip(X_test, y_test)), batch_size=batch_size, shuffle=False)
 
-
-tabM_naive = raph.TabM_Naive([X_train.shape[1], 64, 32, 16, 1])
-tabM = raph.TabM([X_train.shape[1], 64, 32, 16, 1])
-simple_MLP = nn.Sequential(nn.Linear(X_train.shape[1], 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 16), nn.ReLU(), nn.Linear(16, 1))
-MLP_k = raph.MLP_k(simple_MLP)
+    return train_loader, test_loader
 
 
 
@@ -81,6 +77,13 @@ def train_cancer(net, train_loader, test_loader, log_dir, criterion = nn.BCEWith
             writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
 
 
+
+train_loader, test_loader = get_cancer_data()
+
+tabM_naive = raph.TabM_Naive([30, 64, 32, 16, 1])
+tabM = raph.TabM([30, 64, 32, 16, 1])
+simple_MLP = nn.Sequential(nn.Linear(30, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 16), nn.ReLU(), nn.Linear(16, 1))
+MLP_k = raph.MLP_k(simple_MLP)
 
 
 train_cancer(tabM_naive, train_loader, test_loader, 'runs/tabM_naive')
