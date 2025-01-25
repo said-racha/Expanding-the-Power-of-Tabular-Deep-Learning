@@ -5,7 +5,8 @@ import seaborn as sns
 import torch.nn as nn
 import pandas as pd
 from sklearn.manifold import TSNE
-
+from scipy.special import kl_div
+import numpy as np
 
 
 def compute_correlation(preds):
@@ -20,6 +21,21 @@ def compute_correlation(preds):
 
     return torch.tensor(spearman_corrs).mean()
 
+
+def plot_model_correlation(preds, model_name="TabM"):
+    corr_matrix = np.zeros((preds.size(0),preds.size(1), preds.size(1)))
+    for example_idx in range(preds.size(0)):
+        preds_for_example = preds[example_idx].detach().cpu().numpy()
+        corr_matrix[example_idx] = np.corrcoef(preds_for_example)  # Matrice de corrélation
+    
+    corr_matrix = corr_matrix.mean(axis=0)  # Moyenne sur les exemples
+
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(corr_matrix, cmap="coolwarm", fmt=".2f")
+    plt.title(f"Matrice de corrélation entre sous-modèles ({model_name})")
+    plt.xlabel("Sous-modèles")
+    plt.ylabel("Sous-modèles")
+    plt.show()
 
 
 def plot_predictions_distribution(preds,titre=""):
@@ -37,8 +53,6 @@ def plot_predictions_distribution(preds,titre=""):
     plt.show()
 
 
-from scipy.special import kl_div
-import numpy as np
 
 def compute_kl_divergence(preds):
 
@@ -77,44 +91,21 @@ def visualize_tsne(intermediates, title="t-SNE Visualization"):
     plt.show()
 
 
-if __name__ == "__main__":
-
-    import tabm_raph as raph
-    import tabm_luc as luc
-    from test_wine import get_wine_data
-    from test_wine import train_multiclass_classification
-
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
-
+def full_test_classif(models:list, model_names:list, layers, get_data, f_train, device, batch_size = 32, nb_iter=30):
     
-    # modèles
-    layers = [64, 32, 16]
-    tabM_naive = luc.EnsembleModel(luc.TabM_naive, 13, layers, 3, dropout_rate=0)
-    tabM_mini = luc.EnsembleModel(luc.TabM_mini, 13, layers, 3, dropout_rate=0)
-    tabM = luc.EnsembleModel(luc.TabM, 13, layers, 3, dropout_rate=0)
-    mlpk = luc.EnsembleModel(luc.MLPk, 13, layers, 3, dropout_rate=0)
-    
+    # données
+    train_loader, test_loader, shape_x, shape_y = get_data(split=.2, batch_size=batch_size, seed=42)
 
 
     # entraînement
-    BATCH_SIZE = 32
-    train_loader, test_loader = get_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42)
-    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device, verbose=False)
-    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device, verbose=False)
-    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/mlpk", device, verbose=False)
+    for model, name in zip(models, model_names):
+        f_train(model, train_loader, test_loader, f"runs/{name}", device, nb_iter=nb_iter)
     
 
     # données test
-    tabM.mean_over_heads = False
-    tabM_naive.mean_over_heads = False
-    mlpk.mean_over_heads = False
+    for model in models:
+        model.mean_over_heads = False
     
-
     X_test = []
     Y_test = []
     for inputs, labels in test_loader:  # Itérez sur le DataLoader pour récupérer toutes les données
@@ -123,37 +114,23 @@ if __name__ == "__main__":
     X_test = torch.cat(X_test, dim=0).to(device)
     Y_test = torch.cat(Y_test, dim=0).to(device)
     
-    
-    preds_tabm = tabM(X_test)
-    preds_tabm_naive = tabM_naive(X_test)
-    preds_mlpk = mlpk(X_test)
+    for model, name in zip(models, model_names):
+        preds = model(X_test)
 
-    # Corrélations
-    spearman_tabm = compute_correlation(preds_tabm)
-    spearman_tabm_naive = compute_correlation(preds_tabm_naive)
-    spearman_mlpk = compute_correlation(preds_mlpk)
-    print(f"Corrélation Spearman moyenne (TabM) : {spearman_tabm:.4f}")
-    print(f"Corrélation Spearman moyenne (TabM Naive) : {spearman_tabm_naive:.4f}")
-    print(f'Corrélation Spearman moyenne (MLP_k) : {spearman_mlpk:.4f}')
+        # Corrélations
+        spearman = compute_correlation(preds)
+        print(f"Corrélation Spearman moyenne ({name}) : {spearman:.4f}")
 
-    # Visualisation
-    plot_predictions_distribution(preds_tabm,"TabM")
-    plot_predictions_distribution(preds_tabm_naive, "TabM Naive")
-    plot_predictions_distribution(preds_mlpk, "MLP_k")
+        # Matrice de corrélation
+        plot_model_correlation(preds, name)
 
-
-    # KL-Divergence
-    kl_tabm = compute_kl_divergence(preds_tabm)
-    kl_tabm_naive = compute_kl_divergence(preds_tabm_naive)
-    kl_mlpk = compute_kl_divergence(preds_mlpk)
-    print(f"KL-Divergence moyenne (TabM): {kl_tabm:.4f}")
-    print(f"KL-Divergence moyenne (TabM Naive): {kl_tabm_naive:.4f}")
-    print(f"KL-Divergence moyenne (MLP_k): {kl_mlpk:.4f}")
-    
-
-
-
-
+        # Visualisation
+        plot_predictions_distribution(preds, name)
+        
+        # KL-Divergence
+        kl_diver = compute_kl_divergence(preds)
+        print(f"KL-Divergence moyenne ({name}): {kl_diver:.4f}")
+        
 
 
     # test des initialisations
@@ -161,16 +138,16 @@ if __name__ == "__main__":
     distributions = ['uniform', 'normal', 'laplace']
 
     results = []
-
+    couches = [shape_x] + layers + [shape_y]    
     for scale in perturbation_scales:
         for dist in distributions:
             model = raph.TabM(
-                [13, 64, 32, 16, 3],
+                couches,
                 amplitude=scale,
                 init=dist
             )
 
-            train_multiclass_classification(model, train_loader, test_loader, f"runs/wine/{dist}_{scale}", device)
+            f_train(model, train_loader, test_loader, f"runs/{dist}_{scale}", device, nb_iter=nb_iter)
             model.mean_over_heads = False
             preds_k = model(X_test)
             preds_mean = preds_k.mean(dim=1)
@@ -190,13 +167,123 @@ if __name__ == "__main__":
     print(df)
     
 
-
-
-
     # visualisation des sorties des couches intermédiaires/cachées
 
-    model = raph.TabM([13, 64, 32, 16, 3])
-    train_multiclass_classification(model, train_loader, test_loader, f"runs/wine/hidden", device, verbose=False)
+    model = raph.TabM(couches)
+    f_train(model, train_loader, test_loader, f"runs/hidden", device, nb_iter=nb_iter)
     model.intermediaire = True
     intermediaires = model(X_test)
     visualize_tsne(intermediaires, title=f"TabM t-SNE")
+
+
+
+
+
+def full_test_reg(models:list, model_names:list, layers, get_data, f_train, device, batch_size = 32, nb_iter = 30):
+    # données
+    train_loader, test_loader, shape_x, shape_y = get_data(split=.2, batch_size=batch_size, seed=42)
+
+
+    # entraînement
+    for model, name in zip(models, model_names):
+        f_train(model, train_loader, test_loader, f"runs/{name}", device, nb_iter=nb_iter)
+    
+
+    # données test
+    for model in models:
+        model.mean_over_heads = False
+    
+    X_test = []
+    Y_test = []
+    for inputs, labels in test_loader:  # Itérez sur le DataLoader pour récupérer toutes les données
+        X_test.append(inputs)
+        Y_test.append(labels)
+    X_test = torch.cat(X_test, dim=0).to(device)
+    Y_test = torch.cat(Y_test, dim=0).to(device)
+    
+    for model, name in zip(models, model_names):
+        preds = model(X_test)
+
+        # Matrice de corrélation
+        plot_model_correlation(preds.T, name)
+
+        # Visualisation
+        plot_predictions_distribution(preds.T, name)
+        
+        # KL-Divergence
+        kl_div = compute_kl_divergence(preds)
+        print(f"KL-Divergence moyenne ({name}): {kl_div:.4f}")
+        
+
+    # test des initialisations
+    perturbation_scales = [0.1, 0.5, 1.0, 2.0]
+    distributions = ['uniform', 'normal', 'laplace']
+
+    results = []
+    couches = [shape_x] + layers + [shape_y]    
+    for scale in perturbation_scales:
+        for dist in distributions:
+            model = raph.TabM(
+                couches,
+                amplitude=scale,
+                init=dist
+            )
+
+            f_train(model, train_loader, test_loader, f"runs/{dist}_{scale}", device, nb_iter=nb_iter)
+            model.mean_over_heads = False
+            preds_k = model(X_test)
+            preds_mean = preds_k.mean(dim=1)
+
+            preds_classes = torch.argmax(preds_mean, dim=1)
+            mse = nn.functional.mse_loss(preds_classes,Y_test).mean()
+
+            results.append({
+                'scale': scale,
+                'distribution': dist,
+                'mse': mse.item()
+            })
+    
+    df = pd.DataFrame(results)
+    print(df)
+    
+
+    # visualisation des sorties des couches intermédiaires/cachées
+
+    model = raph.TabM(couches)
+    f_train(model, train_loader, test_loader, f"runs/hidden", device, nb_iter=nb_iter)
+    model.intermediaire = True
+    intermediaires = model(X_test)
+    visualize_tsne(intermediaires, title=f"TabM t-SNE")
+
+
+
+
+
+if __name__ == "__main__":
+
+    import tabm_raph as raph
+    import tabm_luc as luc
+    from test_wine import train_multiclass_classification
+    from datasets_tests import train_regression, get_california_housing_data, get_wine_data, train_classification
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
+    
+    # modèles
+    layers = [32, 16]
+    dim_in = 13
+    dim_out = 3
+    tabM_naive = luc.EnsembleModel(luc.TabM_naive, dim_in, layers, dim_out, dropout_rate=0)
+    tabM_mini = luc.EnsembleModel(luc.TabM_mini, dim_in, layers, dim_out, dropout_rate=0)
+    tabM = luc.EnsembleModel(luc.TabM, dim_in, layers, dim_out, dropout_rate=0)
+    mlpk = luc.EnsembleModel(luc.MLPk, dim_in, layers, dim_out, dropout_rate=0)
+
+    #full_test_reg([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_california_housing_data, train_regression, device, batch_size = 256, nb_iter=10)
+
+    full_test_classif([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)
+    
