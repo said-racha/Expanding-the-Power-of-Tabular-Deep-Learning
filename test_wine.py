@@ -11,8 +11,10 @@ import tabm_luc as luc
 import tabm_racha as racha
 import tabm_raph as raph
 
+import plotly.graph_objects as go
 
-def train_multiclass_classification(net, train_loader, test_loader, log_dir, device, criterion=nn.CrossEntropyLoss(), lr=1e-3, nb_iter=20, verbose=True):
+
+def train_multiclass_classification(net, train_loader, test_loader, log_dir, device, criterion=nn.CrossEntropyLoss(), lr=1e-3, nb_iter=20, verbose=True, log_confidence=False):
     optim = torch.optim.AdamW(net.parameters(), lr=lr)
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -23,12 +25,20 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
         losses = []
         train_correct = 0
         train_total = 0
+        
+        if log_confidence:
+            confidences = []
 
         for x, y in train_loader:
             x = x.to(device)
-            y = y.to(device)
+            y = y.reshape(-1).to(device)
             
-            yhat = net(x)
+            if log_confidence:
+                yhat, confidence = net(x)
+                confidences.append(confidence.mean())
+            else:
+                yhat = net(x)
+
             loss = criterion(yhat, y)
             losses.append(loss)
 
@@ -44,18 +54,28 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
         if verbose:
             writer.add_scalar("Loss/train", torch.tensor(losses).mean(), epoch)
             writer.add_scalar("Accuracy/train", train_correct / train_total, epoch)
+            if log_confidence:
+                writer.add_scalar("Confidence/train", torch.tensor(confidences).mean(), epoch)
 
         net.eval()
         with torch.no_grad():
             test_losses = []
             test_correct = 0
             test_total = 0
+            
+            if log_confidence:
+                confidences = []
 
             for x, y in test_loader:
                 x = x.to(device)
-                y = y.to(device)
+                y = y.reshape(-1).to(device)
                 
-                yhat = net(x)
+                
+                if log_confidence:
+                    yhat, confidence = net(x)
+                    confidences.append(confidence.mean())
+                else:
+                    yhat = net(x)
                 loss = criterion(yhat, y)
                 test_losses.append(loss)
 
@@ -67,6 +87,8 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
             if verbose:
                 writer.add_scalar("Loss/test", torch.tensor(test_losses).mean(), epoch)
                 writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
+                if log_confidence:
+                    writer.add_scalar("Confidence/test", torch.tensor(confidences).mean(), epoch)
             
             
 def get_wine_data(split=.2, batch_size=32, seed=42):
@@ -116,16 +138,26 @@ if __name__ == "__main__":
     # ===== Luc =====
     
     mlp = luc.MLP(13, hidden_sizes, 3, dropout_rate=0).to(device)
-    mlpk = luc.EnsembleModel(luc.MLPk, 13, hidden_sizes, 3, dropout_rate=0).to(device)
-    tabM_naive = luc.EnsembleModel(luc.TabM_naive, 13, hidden_sizes, 3, dropout_rate=0).to(device)
-    tabM_mini = luc.EnsembleModel(luc.TabM_mini, 13, hidden_sizes, 3, dropout_rate=0).to(device)
-    tabM = luc.EnsembleModel(luc.TabM, 13, hidden_sizes, 3, dropout_rate=0).to(device)
+    mlpk = luc.EnsembleModel(luc.MLPk, 13, hidden_sizes, 3, dropout_rate=0, get_confidence=True).to(device)
+    tabM_naive = luc.EnsembleModel(luc.TabM_naive, 13, hidden_sizes, 3, dropout_rate=0, get_confidence=True).to(device)
+    tabM_mini = luc.EnsembleModel(luc.TabM_mini, 13, hidden_sizes, 3, dropout_rate=0, get_confidence=True).to(device)
+    tabM = luc.EnsembleModel(luc.TabM, 13, hidden_sizes, 3, dropout_rate=0, get_confidence=True).to(device)
     
-    train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/luc/MLP", device)
-    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/luc/MLPk", device)
-    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/luc/TabM_naive", device)
-    train_multiclass_classification(tabM_mini, train_loader, test_loader, "runs/wine/luc/TabM_mini", device)
-    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/luc/TabM", device)
+    train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/MLP", device)
+    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/MLPk", device, log_confidence=True)
+    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/TabM_naive", device, log_confidence=True)
+    train_multiclass_classification(tabM_mini, train_loader, test_loader, "runs/wine/TabM_mini", device, log_confidence=True)
+    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/TabM", device, log_confidence=True)
+    
+    mlpk_weighted = luc.EnsembleModel(luc.MLPk, 13, hidden_sizes, 3, dropout_rate=0, head_aggregation="weighted", get_confidence=True).to(device)
+    tabM_naive_weighted = luc.EnsembleModel(luc.TabM_naive, 13, hidden_sizes, 3, dropout_rate=0, head_aggregation="weighted", get_confidence=True).to(device)
+    tabM_mini_weighted = luc.EnsembleModel(luc.TabM_mini, 13, hidden_sizes, 3, dropout_rate=0, head_aggregation="weighted", get_confidence=True).to(device)
+    tabM_weighted = luc.EnsembleModel(luc.TabM, 13, hidden_sizes, 3, dropout_rate=0, head_aggregation="weighted", get_confidence=True).to(device)
+    
+    train_multiclass_classification(mlpk_weighted, train_loader, test_loader, "runs/wine/MLPk_weighted", device, log_confidence=True)
+    train_multiclass_classification(tabM_naive_weighted, train_loader, test_loader, "runs/wine/TabM_naive_weighted", device, log_confidence=True)
+    train_multiclass_classification(tabM_mini_weighted, train_loader, test_loader, "runs/wine/TabM_mini_weighted", device, log_confidence=True)
+    train_multiclass_classification(tabM_weighted, train_loader, test_loader, "runs/wine/TabM_weighted", device, log_confidence=True)
     
     # ===== Racha =====
     
@@ -137,13 +169,17 @@ if __name__ == "__main__":
     
     # ===== Raphaël =====
     
-    mlp = nn.Sequential(nn.Linear(13, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 3)).to(device)
-    mlpk = raph.MLP_k(mlp).to(device)
-    tabM_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
-    tabM = raph.TabM([13, 64, 32, 16, 3]).to(device)
+    # mlp = nn.Sequential(nn.Linear(13, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 3)).to(device)
+    # mlpk = raph.MLP_k(mlp).to(device)
+    # tabM_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
+    # tabM = raph.TabM([13, 64, 32, 16, 3]).to(device)
     
-    train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/raph/MLP", device)
-    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/MLPk", device)
-    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device)
-    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
+    # train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/raph/MLP", device)
+    # train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/MLPk", device)
+    # train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device)
+    # train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
+
+
+
+    
     
