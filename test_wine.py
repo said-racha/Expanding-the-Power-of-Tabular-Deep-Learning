@@ -49,6 +49,7 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
 
             optim.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
             optim.step()
 
         if verbose:
@@ -115,7 +116,7 @@ def get_wine_data(split=.2, batch_size=32, seed=42):
         batch_size=batch_size, shuffle=False
     )
     
-    return train_loader, test_loader
+    return train_loader, test_loader, torch.tensor(X_train).float()
 
 if __name__ == "__main__":
     # Classification : `wine`
@@ -130,7 +131,7 @@ if __name__ == "__main__":
         
     print(f"Using device: {device}")
     
-    train_loader, test_loader = get_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42)
+    train_loader, test_loader, X_train = get_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42)
     
     hidden_sizes = [64, 64]
     
@@ -178,8 +179,7 @@ if __name__ == "__main__":
     # train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/MLPk", device)
     # train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device)
     # train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
-
-
-
     
-    
+    # tabM_ple = raph.TabM_with_PLE([130, 64, 3]).to(device)
+    # tabM_ple.fit_bins(X_train) # initialisation des bins
+    # train_multiclass_classification(tabM_ple, train_loader, test_loader, "runs/wine/raph/TabM_PLE", device)

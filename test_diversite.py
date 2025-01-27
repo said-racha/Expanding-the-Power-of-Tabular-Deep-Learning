@@ -7,11 +7,13 @@ import pandas as pd
 from sklearn.manifold import TSNE
 from scipy.special import kl_div
 import numpy as np
+import torch.nn.functional as F
+
 
 
 def compute_correlation(preds):
 
-    batch_size, _, _ = preds.size()
+    batch_size = preds.size()[0]
     spearman_corrs = []
 
     for i in range(batch_size):
@@ -55,12 +57,11 @@ def plot_predictions_distribution(preds,titre=""):
 
 
 def compute_kl_divergence(preds):
-
     batch_size, k, output_dim = preds.size()
     kl_divergences = np.empty((batch_size,k,output_dim))
 
     for i in range(batch_size):
-        example_preds = preds[i].detach().cpu().numpy()
+        example_preds = F.softmax(preds[i], dim=-1).detach().cpu().numpy()
         mean_dist = example_preds.mean(axis=0)
 
         for j in range(k):
@@ -69,7 +70,7 @@ def compute_kl_divergence(preds):
     return torch.tensor(kl_divergences).mean()
 
 
-
+"""
 def visualize_tsne(intermediates, title="t-SNE Visualization"):
 
     tsne = TSNE(n_components=2, perplexity=30, random_state=42)
@@ -89,6 +90,62 @@ def visualize_tsne(intermediates, title="t-SNE Visualization"):
     plt.xlabel("t-SNE Component 1")
     plt.ylabel("t-SNE Component 2")
     plt.show()
+"""
+
+
+def visualize_tsne(intermediates, title="Distributions par couche"):
+
+    num_layers = len(intermediates)
+    if num_layers < 4:
+        num_cols = 2
+    else:
+        num_cols = 3  # Nombre de colonnes pour le grid des plots
+    num_rows = (num_layers + num_cols - 1) // num_cols  # Calcul du nombre de lignes
+
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 6, num_rows * 5))
+    axes = axes.flatten()  # Aplatir les axes pour itération facile
+
+    for i, (layer, ax) in enumerate(zip(intermediates, axes)):
+        batch, num_models, dim = layer.size()
+
+        # Réorganiser les données pour les visualiser (batch * modèles, dimensions)
+        outputs = layer.reshape(-1, dim).detach().cpu().numpy()  # (batch * k, dim)
+        model_ids = torch.arange(num_models).repeat(batch).numpy()  # Identifiants des sous-modèles
+        layer_data = {"Model ID": model_ids}
+
+        # Réduction de la dimension pour visualisation (via t-SNE)
+        tsne = TSNE(n_components=2, perplexity=30, random_state=42)
+        reduced_outputs = tsne.fit_transform(outputs)  # Réduction à 2D
+        layer_data["t-SNE Component 1"] = reduced_outputs[:, 0]
+        layer_data["t-SNE Component 2"] = reduced_outputs[:, 1]
+
+        # Création du DataFrame pour Seaborn
+        import pandas as pd
+        df_layer = pd.DataFrame(layer_data)
+
+        # Plot des distributions pour cette couche
+        sns.scatterplot(
+            data=df_layer,
+            x="t-SNE Component 1",
+            y="t-SNE Component 2",
+            hue="Model ID",
+            palette="viridis",
+            ax=ax,
+            alpha=0.7,
+        )
+
+        ax.set_title(f"Couche {i+1}")
+        ax.legend(title="Sous-modèles", bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.set_xlabel("t-SNE Component 1")
+        ax.set_ylabel("t-SNE Component 2")
+
+    # Ajustement du layout global
+    for ax in axes[len(intermediates):]:  # Supprimer les axes inutilisés
+        fig.delaxes(ax)
+    fig.suptitle(title, fontsize=16)
+    fig.tight_layout()
+    plt.show()
+
 
 
 def full_test_classif(models:list, model_names:list, layers, get_data, f_train, device, batch_size = 32, nb_iter=30):
@@ -96,15 +153,13 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
     # données
     train_loader, test_loader, shape_x, shape_y = get_data(split=.2, batch_size=batch_size, seed=42)
 
-
+    """
     # entraînement
     for model, name in zip(models, model_names):
         f_train(model, train_loader, test_loader, f"runs/{name}", device, nb_iter=nb_iter)
-    
+    """
 
     # données test
-    for model in models:
-        model.mean_over_heads = False
     
     X_test = []
     Y_test = []
@@ -113,8 +168,9 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
         Y_test.append(labels)
     X_test = torch.cat(X_test, dim=0).to(device)
     Y_test = torch.cat(Y_test, dim=0).to(device)
-    
+    """
     for model, name in zip(models, model_names):
+        model.head_aggregation = "none"
         preds = model(X_test)
 
         # Corrélations
@@ -165,14 +221,16 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
     
     df = pd.DataFrame(results)
     print(df)
-    
+    """
 
     # visualisation des sorties des couches intermédiaires/cachées
-
+    couches = [shape_x] + layers + [shape_y] #
     model = raph.TabM(couches)
     f_train(model, train_loader, test_loader, f"runs/hidden", device, nb_iter=nb_iter)
     model.intermediaire = True
+    model.mean_over_heads = False
     intermediaires = model(X_test)
+    print(intermediaires[0].shape,intermediaires[1].shape)
     visualize_tsne(intermediaires, title=f"TabM t-SNE")
 
 
