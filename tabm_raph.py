@@ -70,6 +70,63 @@ class LinearBE(nn.Module): # BatchEnsemble layer
     
 
 
+class NonLinearBE(nn.Module):  # BatchEnsemble layer with non-linear transformations
+    def __init__(self, dim_in: int, dim_out: int, k=32, init="uniform", amplitude_init=1.0, activation_RS=torch.tanh):
+        super().__init__()
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+        self.k = k
+        self.activation_RS = activation_RS  # Allow passing a custom activation function
+
+        self.R = nn.Parameter(torch.Tensor(k, dim_in))
+        self.W = nn.Parameter(torch.Tensor(dim_in, dim_out))
+        self.S = nn.Parameter(torch.Tensor(k, dim_out))
+        self.B = nn.Parameter(torch.Tensor(k, dim_out))
+
+        if init == "uniform":
+            nn.init.uniform_(self.R, -1, 1)
+            nn.init.uniform_(self.S, -1, 1)
+
+        elif init == "ones":
+            nn.init.ones_(self.R)
+            nn.init.normal_(self.S)
+        
+        elif init == "normal":
+            nn.init.normal_(self.S)
+            nn.init.normal_(self.R)
+
+        elif init == "laplace":
+            dist = torch.distributions.laplace.Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
+            self.R.data = dist.sample((k, dim_in))[:, :, 0]
+            self.S.data = dist.sample((k, dim_out))[:, :, 0]
+        
+        else:
+            raise ValueError("init should be 'uniform', 'normal', 'ones' or 'laplace'")
+
+        self.R.data *= amplitude_init
+        self.S.data *= amplitude_init
+
+        nn.init.normal_(self.W)
+        nn.init.normal_(self.B)
+
+    def forward(self, X):
+        """
+        Non-linear version of BatchEnsemble transformation.
+        """
+        # Element-wise multiplication of X and non-linearly transformed R
+        transformed_R = self.activation_RS(self.R)
+        output = torch.mul(X, transformed_R)  # (batch_size, k, dim_in)
+
+        # Matrix multiplication with W
+        output = torch.einsum("bki,io->bko", output, self.W)  # (batch_size, k, dim_out)
+
+        # Apply non-linear transformation on S and multiply element-wise, add B
+        transformed_S = self.activation_RS(self.S)
+        output = output * transformed_S + self.B  # (batch_size, k, dim_out)
+
+        return output
+
+
 
 class PiecewiseLinearEncoding(nn.Module):
     # YuryGorishniy, IvanRubachev,andArtemBabenko (2022). 
@@ -230,6 +287,47 @@ class TabM(nn.Module):
             X = layer(X)
 
             if (isinstance(layer, LinearBE) or isinstance(layer, nn.Linear)) and self.intermediaire:
+                intermediaire.append(X)
+        
+        if intermediaire:
+            return intermediaire
+        
+        # predictions
+        preds = torch.stack([head(X[:,i]) for i, head in enumerate(self.pred_heads)], dim=1)
+        
+        if self.mean_over_heads:
+            return preds.mean(dim=1)
+        return preds
+
+class NonLinearTabM(nn.Module):
+    def __init__(self, layers_shapes:list, k=32, mean_over_heads = True, init="uniform", amplitude=1.0, intermediaire=False, activationRS=torch.tanh):
+        super().__init__()
+
+        self.k = k
+        self.intermediaire = intermediaire
+
+        self.layers = torch.nn.ModuleList([NonLinearBE(layers_shapes[0], layers_shapes[1], k, init="ones", activation_RS=activationRS),
+                                          torch.nn.ReLU(),
+                                          torch.nn.Dropout(0.1)])
+
+        for i in range(1,len(layers_shapes)-2):
+            self.layers.append(NonLinearBE(layers_shapes[i], layers_shapes[i+1], k, init, amplitude, activation_RS=activationRS))
+            self.layers.append(torch.nn.ReLU())
+            self.layers.append(torch.nn.Dropout(0.1))
+        
+        self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-2], layers_shapes[-1]) for _ in range(k)])
+        self.mean_over_heads = mean_over_heads
+
+    
+    def forward(self, x):
+        X = x.unsqueeze(1).repeat(1, self.k, 1)
+
+        intermediaire = []
+
+        for layer in self.layers:
+            X = layer(X)
+
+            if (isinstance(layer, NonLinearBE) or isinstance(layer, nn.Linear)) and self.intermediaire:
                 intermediaire.append(X)
         
         if intermediaire:

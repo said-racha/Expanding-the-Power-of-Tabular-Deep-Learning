@@ -93,7 +93,7 @@ def visualize_tsne(intermediates, title="t-SNE Visualization"):
 """
 
 
-def visualize_tsne(intermediates, title="Distributions par couche"):
+def visualize_tsne(intermediates,title="Distributions par couche"):
 
     num_layers = len(intermediates)
     if num_layers < 4:
@@ -168,9 +168,12 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
         Y_test.append(labels)
     X_test = torch.cat(X_test, dim=0).to(device)
     Y_test = torch.cat(Y_test, dim=0).to(device)
-    """
+    
     for model, name in zip(models, model_names):
-        model.head_aggregation = "none"
+        if isinstance(model, luc.EnsembleModel):
+            model.head_aggregation = "none"
+        else:
+            model.mean_over_heads = False
         preds = model(X_test)
 
         # Corrélations
@@ -221,7 +224,7 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
     
     df = pd.DataFrame(results)
     print(df)
-    """
+    
 
     # visualisation des sorties des couches intermédiaires/cachées
     couches = [shape_x] + layers + [shape_y] #
@@ -230,7 +233,6 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
     model.intermediaire = True
     model.mean_over_heads = False
     intermediaires = model(X_test)
-    print(intermediaires[0].shape,intermediaires[1].shape)
     visualize_tsne(intermediaires, title=f"TabM t-SNE")
 
 
@@ -333,15 +335,17 @@ if __name__ == "__main__":
 
     
     # modèles
-    layers = [32, 16]
+    layers = [64, 32, 16, 10]
     dim_in = 13
     dim_out = 3
-    tabM_naive = luc.EnsembleModel(luc.TabM_naive, dim_in, layers, dim_out, dropout_rate=0)
-    tabM_mini = luc.EnsembleModel(luc.TabM_mini, dim_in, layers, dim_out, dropout_rate=0)
-    tabM = luc.EnsembleModel(luc.TabM, dim_in, layers, dim_out, dropout_rate=0)
-    mlpk = luc.EnsembleModel(luc.MLPk, dim_in, layers, dim_out, dropout_rate=0)
+    #tabM_naive = luc.EnsembleModel(luc.TabM_naive, dim_in, layers, dim_out, dropout_rate=0)
+    #tabM_mini = luc.EnsembleModel(luc.TabM_mini, dim_in, layers, dim_out, dropout_rate=0)
+    #tabM = luc.EnsembleModel(luc.TabM, dim_in, layers, dim_out, dropout_rate=0)
+    #mlpk = luc.EnsembleModel(luc.MLPk, dim_in, layers, dim_out, dropout_rate=0)
 
     #full_test_reg([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_california_housing_data, train_regression, device, batch_size = 256, nb_iter=10)
-
-    full_test_classif([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)
+    #full_test_classif([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)
     
+    nonLinTabM = raph.NonLinearTabM([dim_in,*layers,dim_out])
+    tabM = raph.TabM([dim_in,*layers,dim_out])
+    full_test_classif([tabM, nonLinTabM], ["TabM", "NL_TabM"], layers, get_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)

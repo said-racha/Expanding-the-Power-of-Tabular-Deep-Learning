@@ -137,7 +137,7 @@ if __name__ == "__main__":
     
     
     # ===== Luc =====
-    
+    """
     mlp = luc.MLP(13, hidden_sizes, 3, dropout_rate=0).to(device)
     mlpk = luc.EnsembleModel(luc.MLPk, 13, hidden_sizes, 3, dropout_rate=0, get_confidence=True).to(device)
     tabM_naive = luc.EnsembleModel(luc.TabM_naive, 13, hidden_sizes, 3, dropout_rate=0, get_confidence=True).to(device)
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     train_multiclass_classification(tabM_naive_weighted, train_loader, test_loader, "runs/wine/TabM_naive_weighted", device, log_confidence=True)
     train_multiclass_classification(tabM_mini_weighted, train_loader, test_loader, "runs/wine/TabM_mini_weighted", device, log_confidence=True)
     train_multiclass_classification(tabM_weighted, train_loader, test_loader, "runs/wine/TabM_weighted", device, log_confidence=True)
-    
+    """
     # ===== Racha =====
     
     # mlp = racha.SimpleMLP(13, hidden_sizes, 3).to(device)
@@ -173,12 +173,14 @@ if __name__ == "__main__":
     # mlp = nn.Sequential(nn.Linear(13, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU(), nn.Linear(64, 3)).to(device)
     # mlpk = raph.MLP_k(mlp).to(device)
     # tabM_naive = raph.TabM_Naive([13, 64, 32, 16, 3]).to(device)
-    # tabM = raph.TabM([13, 64, 32, 16, 3]).to(device)
+    tabM = raph.TabM([13, 64, 32, 16, 3]).to(device)
+    nonLinearTabM = raph.NonLinearTabM([13, 64, 32, 16, 3]).to(device)
     
     # train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine/raph/MLP", device)
     # train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine/raph/MLPk", device)
     # train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine/raph/TabM_naive", device)
-    # train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
+    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine/raph/TabM", device)
+    train_multiclass_classification(nonLinearTabM, train_loader, test_loader, "runs/wine/raph/NonLinTabM", device, lr=1e-2)
     
     # tabM_ple = raph.TabM_with_PLE([130, 64, 3]).to(device)
     # tabM_ple.fit_bins(X_train) # initialisation des bins
