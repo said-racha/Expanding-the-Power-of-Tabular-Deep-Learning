@@ -2,7 +2,7 @@ import time
 import pandas as pd
 import numpy as np
 from sklearn.metrics import (
-    accuracy_score, f1_score, precision_score, recall_score, 
+    accuracy_score, f1_score, precision_score, recall_score,
     roc_auc_score, mean_squared_error, r2_score
 )
 from torch.utils.tensorboard import SummaryWriter
@@ -464,9 +464,9 @@ def get_quality_wine_data(split=.2, batch_size=32, seed=42):
 
     # Convert y_train and y_test to Series if they are DataFrames
     if isinstance(y_train, pd.DataFrame):
-        y_train = y_train.squeeze() 
+        y_train = y_train.squeeze()
     if isinstance(y_test, pd.DataFrame):
-        y_test = y_test.squeeze() 
+        y_test = y_test.squeeze()
 
     y_train = y_train.map(label_mapping)
     y_test = y_test.map(label_mapping)
@@ -481,7 +481,7 @@ def get_quality_wine_data(split=.2, batch_size=32, seed=42):
         batch_size=batch_size, shuffle=False
     )
 
-    shape_x = X_train.shape[1] 
+    shape_x = X_train.shape[1]
     shape_y = len(np.unique(y))  # Number of classes
 
     return train_loader, test_loader, shape_x, shape_y
@@ -628,7 +628,7 @@ def train_model(net, train_loader, test_loader, log_dir, device, task_type="bina
         recall = None
         auc = None
         rmse = np.sqrt(mean_squared_error(test_all_labels, test_all_preds))
-        mse = mean_squared_error(test_all_labels, test_all_preds) 
+        mse = mean_squared_error(test_all_labels, test_all_preds)
         r2 = r2_score(test_all_labels, test_all_preds)
 
     results = {
@@ -783,23 +783,22 @@ def dataloader_to_numpy(dataloader):
 
     return X, y
 
-# Run the main function
 if __name__ == "__main__":
     BATCH_SIZE = 32
     device = initialize_device()
 
-    # Load datasets and perform pruning and training for each
     datasets = [
-        ("breast_cancer", get_breast_cancer_data, "binary", 1e-4, 25),
-        ("adult_income", get_adult_income_data, "binary", 1e-4, 10),
-        ("california_housing", get_california_housing_data, "regression", 1e-4, 15),
-        ("iris", get_iris_data, "multiclass", 1e-4, 50), 
-        ("wine_quality", get_quality_wine_data, "multiclass", 1e-4, 20) 
+        # format : dataset_name, loader_func, task_type, lr, nb_epochs,embed_dim, num_heads
+        ("breast_cancer", get_breast_cancer_data, "binary", 1e-4, 26, 24, 4), 
+        ("adult_income", get_adult_income_data, "binary", 1e-4, 20, 48, 6), 
+        ("california_housing", get_california_housing_data, "regression", 1e-7, 12, 10, 1), 
+        ("iris", get_iris_data, "multiclass", 1e-4, 85, 24, 4), 
+        ("wine_quality", get_quality_wine_data, "multiclass", 1e-2, 45, 192, 16)
     ]
 
     results = []
 
-    for dataset_name, loader_func, task_type, lr, nb_epochs in datasets:
+    for dataset_name, loader_func, task_type, lr, nb_epochs, embed_dim, num_heads in datasets:
 
         print(f"\n\n *** Processing {dataset_name} dataset...")
         train_loader, test_loader, shape_x, shape_y = loader_func(split=0.2, batch_size=BATCH_SIZE, seed=42)
@@ -833,8 +832,8 @@ if __name__ == "__main__":
         tabM = EnsembleModel(TabM, input_dim, hidden_sizes, output_dim, dropout_rate=0).to(device)
         mlpk = EnsembleModel(MLPk, input_dim, hidden_sizes, output_dim, dropout_rate=0).to(device)
 
-        embed_dim = 12
-        tabM_attention = TabMWithAttention(input_dim, hidden_sizes, embed_dim, output_dim=output_dim, num_heads=2, k=32, dropout_rate=0.3).to(device)
+        embed_dim = embed_dim
+        tabM_attention = TabMWithAttention(input_dim, hidden_sizes, embed_dim, output_dim=output_dim, num_heads=num_heads, k=32, dropout_rate=0.3).to(device)
 
         # # Define baselines (ExcelFormer, FT-Transformer, T2g-Former)
         # model_config = {
@@ -861,9 +860,9 @@ if __name__ == "__main__":
 
         # Training
         models = {
-            # "TabM_naive": tabM_naive,
-            # "Simple_MLP": simple_MLP,
-            # "TabM_mini": tabM_mini,
+            "TabM_naive": tabM_naive,
+            "Simple_MLP": simple_MLP,
+            "TabM_mini": tabM_mini,
             "TabM": tabM,
             "MLPk": mlpk,
             "TabM_Attention": tabM_attention,
@@ -889,7 +888,7 @@ if __name__ == "__main__":
                 "Execution Time": result["execution_time"]
             })
 
- 
+
         print("Training XGBoost...")
         xgb_result = train_xgboost(X_train, y_train, X_test, y_test, task_type=task_type)
         results.append({
@@ -923,4 +922,5 @@ if __name__ == "__main__":
         })
 
     results_df = pd.DataFrame(results)
+    results_df.to_csv("result_all_models.csv")
     display(results_df)
