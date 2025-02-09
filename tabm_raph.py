@@ -19,7 +19,7 @@ class LinearBE(nn.Module): # BatchEnsemble layer
         self.B = nn.Parameter(torch.Tensor(k, dim_out))
 
         if init == "uniform": # TabM naive
-            # "randomly initialized with ±1 to ensure diversity of the k linear layers" (l.171-172)
+            # randomly initialized with ±1 to ensure diversity of the k linear layers
             nn.init.uniform_(self.R, -1, 1)
             nn.init.uniform_(self.S, -1, 1)
 
@@ -48,7 +48,7 @@ class LinearBE(nn.Module): # BatchEnsemble layer
 
     def forward(self, X):
         """
-        "LinearBE(X) = ( (X * R) W) * S + B" (l.180)
+        LinearBE(X) = ( (X * R) W) * S + B
 
         X has shape (batch_size, k, dim_in)
         R has shape (k, dim_in)
@@ -161,7 +161,9 @@ class PiecewiseLinearEncoding(nn.Module):
         x: shape (batch, d), où d est le nombre de features.
         Return : Tensor de forme (batch, d * num_bins)
         """
-        assert self.bin_edges is not None, "Bin edges must be defined. Call fit_bins first."
+        if self.bin_edges is None:
+            self.fit_bins(x)
+
         batch_size, num_features = x.shape
 
         # Stocker les résultats pour chaque feature
@@ -220,20 +222,20 @@ class TabM_Naive(nn.Module):
 
         self.layers = torch.nn.ModuleList()
 
-        # "applying BatchEnsemble to all linear layers" (l.200)
+        # applying BatchEnsemble to all linear layers
         for i in range(len(layers_shapes)-2):
             self.layers.append(LinearBE(layers_shapes[i], layers_shapes[i+1], k, init, amplitude))
             self.layers.append(torch.nn.ReLU())
             self.layers.append(torch.nn.Dropout(0.1))
         
-        # "fully non-shared prediction heads" (l.201)
+        # fully non-shared prediction heads
         self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-2], layers_shapes[-1]) for _ in range(k)])
         self.mean_over_heads = mean_over_heads
 
     
     def forward(self, x): 
         """
-        "X represents k representations of the same input object x" (l.181)
+        X represents k representations of the same input object x
         so, x has shape (batch, dim)
         and X has shape (batch, k, dim)
         """

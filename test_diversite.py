@@ -12,7 +12,6 @@ import torch.nn.functional as F
 
 
 def compute_correlation(preds):
-
     batch_size = preds.size()[0]
     spearman_corrs = []
 
@@ -28,9 +27,9 @@ def plot_model_correlation(preds, model_name="TabM"):
     corr_matrix = np.zeros((preds.size(0),preds.size(1), preds.size(1)))
     for example_idx in range(preds.size(0)):
         preds_for_example = preds[example_idx].detach().cpu().numpy()
-        corr_matrix[example_idx] = np.corrcoef(preds_for_example)  # Matrice de corrélation
+        corr_matrix[example_idx] = np.corrcoef(preds_for_example)  # correlation matrix
     
-    corr_matrix = corr_matrix.mean(axis=0)  # Moyenne sur les exemples
+    corr_matrix = corr_matrix.mean(axis=0)  # mean over examples
 
     plt.figure(figsize=(8, 6))
     sns.heatmap(corr_matrix, cmap="coolwarm", fmt=".2f")
@@ -61,51 +60,31 @@ def compute_kl_divergence(preds):
     kl_divergences = np.empty((batch_size,k,output_dim))
 
     for i in range(batch_size):
-        example_preds = F.softmax(preds[i], dim=-1).detach().cpu().numpy()
-        mean_dist = example_preds.mean(axis=0)
+        example_preds = F.softmax(preds[i], dim=-1).detach().cpu().numpy()+1e-6
+        mean_dist = example_preds.mean(axis=0)+1e-6
 
         for j in range(k):
-            kl = 0.5 * (kl_div(example_preds[j], mean_dist)**2 + kl_div(mean_dist, example_preds[j])**2) # c'est un peu douteux comme formule car normalement on compare deux distributions, pas k
+            kl = 0.5 * (kl_div(example_preds[j], mean_dist)**2 + kl_div(mean_dist, example_preds[j])**2)
             kl_divergences[i,j] = kl
     return torch.tensor(kl_divergences).mean()
 
 
-"""
-def visualize_tsne(intermediates, title="t-SNE Visualization"):
-
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-
-    plt.figure(figsize=(8, 6))
-    colors = plt.cm.viridis(torch.linspace(0, 1, len(intermediates)))        
-
-    for i, (layer, color) in enumerate(zip(intermediates, colors)):
-        outputs = layer.reshape(-1, layer.size(-1)).detach().cpu().numpy()
-        reduced_outputs = tsne.fit_transform(outputs)
-
-        plt.scatter(reduced_outputs[:, 0], reduced_outputs[:, 1], label=f'Layer {i+1}', alpha=0.7, color=color)
-        
-    
-    plt.title(title)
-    plt.legend()
-    plt.xlabel("t-SNE Component 1")
-    plt.ylabel("t-SNE Component 2")
-    plt.show()
-"""
-
 
 def visualize_tsne(intermediates,title="Distributions par couche"):
 
+    # layout
     num_layers = len(intermediates)
-    if num_layers < 4:
+    if num_layers <= 4:
         num_cols = 2
     else:
-        num_cols = 3  # Nombre de colonnes pour le grid des plots
-    num_rows = (num_layers + num_cols - 1) // num_cols  # Calcul du nombre de lignes
+        num_cols = 3
+    num_rows = (num_layers + num_cols - 1) // num_cols 
 
     fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 6, num_rows * 5))
-    axes = axes.flatten()  # Aplatir les axes pour itération facile
+    axes = axes.flatten()
 
     for i, (layer, ax) in enumerate(zip(intermediates, axes)):
+        print("couche",i)
         batch, num_models, dim = layer.size()
 
         # Réorganiser les données pour les visualiser (batch * modèles, dimensions)
@@ -119,8 +98,6 @@ def visualize_tsne(intermediates,title="Distributions par couche"):
         layer_data["t-SNE Component 1"] = reduced_outputs[:, 0]
         layer_data["t-SNE Component 2"] = reduced_outputs[:, 1]
 
-        # Création du DataFrame pour Seaborn
-        import pandas as pd
         df_layer = pd.DataFrame(layer_data)
 
         # Plot des distributions pour cette couche
@@ -136,8 +113,8 @@ def visualize_tsne(intermediates,title="Distributions par couche"):
 
         ax.set_title(f"Couche {i+1}")
         ax.legend(title="Sous-modèles", bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.set_xlabel("t-SNE Component 1")
-        ax.set_ylabel("t-SNE Component 2")
+        ax.set_xlabel("")
+        ax.set_ylabel("")
 
     # Ajustement du layout global
     for ax in axes[len(intermediates):]:  # Supprimer les axes inutilisés
@@ -150,16 +127,10 @@ def visualize_tsne(intermediates,title="Distributions par couche"):
 
 def full_test_classif(models:list, model_names:list, layers, get_data, f_train, device, batch_size = 32, nb_iter=30):
     
-    # données
+    # data
     train_loader, test_loader, shape_x, shape_y = get_data(split=.2, batch_size=batch_size, seed=42)
 
-    """
-    # entraînement
-    for model, name in zip(models, model_names):
-        f_train(model, train_loader, test_loader, f"runs/{name}", device, nb_iter=nb_iter)
-    """
-
-    # données test
+    # test data
     
     X_test = []
     Y_test = []
@@ -168,6 +139,11 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
         Y_test.append(labels)
     X_test = torch.cat(X_test, dim=0).to(device)
     Y_test = torch.cat(Y_test, dim=0).to(device)
+
+    
+    # training
+    for model, name in zip(models, model_names):
+        f_train(model, train_loader, test_loader, f"runs/{name}", device, nb_iter=nb_iter)
     
     for model, name in zip(models, model_names):
         if isinstance(model, luc.EnsembleModel):
@@ -176,11 +152,11 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
             model.mean_over_heads = False
         preds = model(X_test)
 
-        # Corrélations
+        # Spearman correlations
         spearman = compute_correlation(preds)
         print(f"Corrélation Spearman moyenne ({name}) : {spearman:.4f}")
 
-        # Matrice de corrélation
+        # Correlation matrix
         plot_model_correlation(preds, name)
 
         # Visualisation
@@ -191,7 +167,7 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
         print(f"KL-Divergence moyenne ({name}): {kl_diver:.4f}")
         
 
-
+    
     # test des initialisations
     perturbation_scales = [0.1, 0.5, 1.0, 2.0]
     distributions = ['uniform', 'normal', 'laplace']
@@ -234,6 +210,7 @@ def full_test_classif(models:list, model_names:list, layers, get_data, f_train, 
     model.mean_over_heads = False
     intermediaires = model(X_test)
     visualize_tsne(intermediaires, title=f"TabM t-SNE")
+    
 
 
 
@@ -251,7 +228,10 @@ def full_test_reg(models:list, model_names:list, layers, get_data, f_train, devi
 
     # données test
     for model in models:
-        model.mean_over_heads = False
+        if isinstance(model, luc.EnsembleModel):
+            model.head_aggregation = "none"
+        else:
+            model.mean_over_heads = False
     
     X_test = []
     Y_test = []
@@ -325,7 +305,7 @@ if __name__ == "__main__":
     import tabm_luc as luc
     from test_wine import train_multiclass_classification
     from datasets_tests import train_regression, get_california_housing_data, get_wine_data, train_classification
-
+    from test_wine_quality import get_quality_wine_data
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -336,16 +316,18 @@ if __name__ == "__main__":
     
     # modèles
     layers = [64, 32, 16, 10]
-    dim_in = 13
-    dim_out = 3
-    #tabM_naive = luc.EnsembleModel(luc.TabM_naive, dim_in, layers, dim_out, dropout_rate=0)
-    #tabM_mini = luc.EnsembleModel(luc.TabM_mini, dim_in, layers, dim_out, dropout_rate=0)
-    #tabM = luc.EnsembleModel(luc.TabM, dim_in, layers, dim_out, dropout_rate=0)
-    #mlpk = luc.EnsembleModel(luc.MLPk, dim_in, layers, dim_out, dropout_rate=0)
+    dim_in = 11
+    dim_out = 11
+    tabM_naive = luc.EnsembleModel(luc.TabM_naive, dim_in, layers, dim_out, dropout_rate=0)
+    tabM_mini = luc.EnsembleModel(luc.TabM_mini, dim_in, layers, dim_out, dropout_rate=0)
+    tabM = luc.EnsembleModel(luc.TabM, dim_in, layers, dim_out, dropout_rate=0)
+    mlpk = luc.EnsembleModel(luc.MLPk, dim_in, layers, dim_out, dropout_rate=0)
+    nonLinTabM = raph.NonLinearTabM([dim_in,*layers,dim_out])
+    tabM_piecewise = raph.TabM_with_PLE([dim_in*10,*layers,dim_out])
 
     #full_test_reg([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_california_housing_data, train_regression, device, batch_size = 256, nb_iter=10)
-    #full_test_classif([tabM, tabM_naive, mlpk], ["TabM", "TabM_naive", "MLPk"], layers, get_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)
+    full_test_classif([tabM, tabM_naive,tabM_mini, mlpk, nonLinTabM, tabM_piecewise], 
+                      ["TabM", "TabM_naive", "TabM_mini","MLPk", "NonLinear_TabM", "TabM_piecewise"], 
+                      layers, get_quality_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)
     
-    nonLinTabM = raph.NonLinearTabM([dim_in,*layers,dim_out])
-    tabM = raph.TabM([dim_in,*layers,dim_out])
-    full_test_classif([tabM, nonLinTabM], ["TabM", "NL_TabM"], layers, get_wine_data, train_multiclass_classification, device, batch_size = 32, nb_iter=20)
+    
