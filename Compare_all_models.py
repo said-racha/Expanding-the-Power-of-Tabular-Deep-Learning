@@ -237,21 +237,22 @@ class MLP(nn.Module):
 
 class EnsembleModel(nn.Module):
     """
-    Global ensemble model that :
+    Global ensemble model that : 
     - takes batched input (batch, in_features)
     - clones it k times (batch, k, in_features)
     - passes it through a backbone (which model you want e.g TabM, MLPk, etc.) (batch, k, hidden_sizes[-1])
     - passes the output through k prediction heads, mean over heads (batch, out_features)
     """
 
-    def __init__(self, backbone: nn.Module, in_features: int, hidden_sizes: int, out_features: int, k=32, dropout_rate=0.1, mean_over_heads=True):
+    def __init__(self, backbone: nn.Module, in_features: int, hidden_sizes: int, out_features: int, k=32, dropout_rate=0.1, head_aggregation:{"mean", "weighted", "none"}="mean", get_confidence=False):
         super().__init__()
 
         self.backbone = backbone(in_features, hidden_sizes, k, dropout_rate)
         self.in_features = in_features
         self.k = k
 
-        self.mean_over_heads = mean_over_heads
+        self.head_aggregation = head_aggregation
+        self.get_confidence = get_confidence
 
         self.pred_heads = nn.ModuleList([nn.Linear(hidden_sizes[-1], out_features) for _ in range(k)])
 
@@ -267,10 +268,52 @@ class EnsembleModel(nn.Module):
 
         # concatenate head predictions
         preds = torch.stack(preds, dim=1)
+        
+        if self.head_aggregation == "weighted":
+            # Binary classification -> multi-class classification (class 0, class 1)
+            binary_classification = False
+            if preds.size(2) == 1:
+                binary_classification = True
+                preds_conf = torch.cat((1 - torch.sigmoid(preds), torch.sigmoid(preds)), dim=2)
+            else:
+                preds_conf = preds
+                
+            preds_softmax = torch.softmax(preds_conf, dim=2)
+            
+            # prevent log(0) without in-place operation
+            preds_softmax = torch.where(preds_softmax == 0, torch.tensor(1e-10, device=preds_softmax.device), preds_softmax)
+            
+            # compute entropy
+            entropy = -torch.sum(preds_softmax * torch.log(preds_softmax), dim=2)
+            max_possible_entropy = torch.log(torch.tensor(preds_softmax.size(2), device=preds_softmax.device))
+    
+            confidences = (max_possible_entropy - entropy) / max_possible_entropy # 0 = no confidence, 1 = full confidence
+            
+            match self.head_aggregation:
+                case "mean":
+                    global_confidence = confidences.mean(dim=1)
+                case "weighted":
+                    global_confidence = (torch.softmax(confidences, dim=1) * confidences).sum(dim=1)
+                case "none":
+                    global_confidence = confidences
+                    
+            # Convert nan to 0
+            global_confidence = torch.nan_to_num(global_confidence)
+            
 
-        if self.mean_over_heads:
-            preds = preds.mean(dim=1)
+        match self.head_aggregation:
+            case "mean":
+                preds = preds.mean(dim=1)
+            case "weighted":
+                weights = torch.softmax(confidences, dim=1)
+                # Preds shape: (batch, k, out_features)
+                # Multiply each head prediction by its weight (= confidence)
+                preds = (preds * weights.unsqueeze(2)).sum(dim=1)
+                # if binary_classification:
+                #     preds = preds[:, 1].unsqueeze(1)
 
+        if self.get_confidence:
+            return preds, global_confidence
         return preds
 
 
@@ -795,6 +838,10 @@ if __name__ == "__main__":
         ("iris", get_iris_data, "multiclass", 1e-4, 85, 24, 4), 
         ("wine_quality", get_quality_wine_data, "multiclass", 1e-2, 45, 192, 16)
     ]
+    
+    # load results from result_all_models.csv
+    # results = pd.read_csv("result_all_models.csv")
+    # results = results.to_dict(orient="records")
 
     results = []
 
@@ -834,6 +881,11 @@ if __name__ == "__main__":
 
         embed_dim = embed_dim
         tabM_attention = TabMWithAttention(input_dim, hidden_sizes, embed_dim, output_dim=output_dim, num_heads=num_heads, k=32, dropout_rate=0.3).to(device)
+        
+        mlpk_weighted = EnsembleModel(MLPk, input_dim, hidden_sizes, output_dim, dropout_rate=0, head_aggregation="weighted").to(device)
+        tabM_weighted = EnsembleModel(TabM, input_dim, hidden_sizes, output_dim, dropout_rate=0, head_aggregation="weighted").to(device)
+        tabM_naive_weighted = EnsembleModel(TabM_naive, input_dim, hidden_sizes, output_dim, dropout_rate=0, head_aggregation="weighted").to(device)
+        tabM_mini_weighted = EnsembleModel(TabM_mini, input_dim, hidden_sizes, output_dim, dropout_rate=0, head_aggregation="weighted").to(device)
 
         # # Define baselines (ExcelFormer, FT-Transformer, T2g-Former)
         # model_config = {
@@ -869,6 +921,10 @@ if __name__ == "__main__":
             # "FT-Transformer": ft,
             # "Excel-Former": excel,
             # "T2g-Former": t2g
+            "MLPk_weighted": mlpk_weighted,
+            "TabM_weighted": tabM_weighted,
+            "TabM_naive_weighted": tabM_naive_weighted,
+            "TabM_mini_weighted": tabM_mini_weighted
         }
 
         for model_name, model in models.items():

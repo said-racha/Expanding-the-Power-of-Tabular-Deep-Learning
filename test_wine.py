@@ -14,7 +14,7 @@ import tabm_raph as raph
 import plotly.graph_objects as go
 
 
-def train_multiclass_classification(net, train_loader, test_loader, log_dir, device, criterion=nn.CrossEntropyLoss(), lr=1e-3, nb_iter=20, verbose=True, log_confidence=False):
+def train_multiclass_classification(net, train_loader, test_loader, log_dir, device, criterion=nn.CrossEntropyLoss(), lr=1e-3, nb_iter=20, verbose=True, log_confidence=False, ood_loader=None):
     optim = torch.optim.AdamW(net.parameters(), lr=lr)
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -71,7 +71,6 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
                 x = x.to(device)
                 y = y.reshape(-1).to(device)
                 
-                
                 if log_confidence:
                     yhat, confidence = net(x)
                     confidences.append(confidence.mean())
@@ -90,6 +89,33 @@ def train_multiclass_classification(net, train_loader, test_loader, log_dir, dev
                 writer.add_scalar("Accuracy/test", test_correct / test_total, epoch)
                 if log_confidence:
                     writer.add_scalar("Confidence/test", torch.tensor(confidences).mean(), epoch)
+                    
+            if ood_loader:
+                ood_losses = []
+                ood_correct = 0
+                ood_total = 0
+                
+                for x, y in ood_loader:
+                    x = x.to(device)
+                    y = y.reshape(-1).to(device)
+                    if log_confidence:
+                        yhat, confidence = net(x)
+                        confidences.append(confidence.mean())
+                    else:
+                        yhat = net(x)
+                    loss = criterion(yhat, y)
+                    ood_losses.append(loss)
+
+                    # Compute accuracy
+                    preds_classes = torch.argmax(yhat, dim=1)
+                    ood_correct += (preds_classes == y).sum()
+                    ood_total += y.size(0)
+                    
+                if verbose:
+                    writer.add_scalar("Loss/ood", torch.tensor(ood_losses).mean(), epoch)
+                    writer.add_scalar("Accuracy/ood", ood_correct / ood_total, epoch)
+                    if log_confidence:
+                        writer.add_scalar("Confidence/ood", torch.tensor(confidences).mean(), epoch)
             
             
 def get_wine_data(split=.2, batch_size=32, seed=42):

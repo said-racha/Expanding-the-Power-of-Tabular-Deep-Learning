@@ -8,7 +8,7 @@ from test_wine import train_multiclass_classification
 import tabm_luc as luc
 
 
-def get_quality_wine_data(split=.2, batch_size=32, seed=42):
+def get_quality_wine_data(split=.2, batch_size=32, seed=42, ood=False):
     # fetch dataset
     wine_quality = fetch_ucirepo(id=186)
 
@@ -37,6 +37,17 @@ def get_quality_wine_data(split=.2, batch_size=32, seed=42):
         torch.utils.data.TensorDataset(torch.tensor(X_test.to_numpy()).float(), torch.tensor(y_test.to_numpy()).long()),
         batch_size=batch_size, shuffle=False
     )
+    
+    if ood:
+        X_ood = X_test + 5
+        y_ood = y_test
+        
+        ood_loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(torch.tensor(X_ood.to_numpy()).float(), torch.tensor(y_ood.to_numpy()).long()),
+            batch_size=batch_size, shuffle=False
+        )
+        
+        return train_loader, test_loader, ood_loader
 
     return train_loader, test_loader
 
@@ -54,7 +65,7 @@ if __name__ == "__main__":
 
     print(f"Using device: {device}")
 
-    train_loader, test_loader = get_quality_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42)
+    train_loader, test_loader, ood_loader = get_quality_wine_data(split=.2, batch_size=BATCH_SIZE, seed=42, ood=True)
 
     hidden_sizes = [64, 64]
 
@@ -63,16 +74,16 @@ if __name__ == "__main__":
     # ===== Classic Models =====
 
     mlp = luc.MLP(in_features, hidden_sizes, out_features, dropout_rate=0).to(device)
-    mlpk = luc.EnsembleModel(luc.MLPk, in_features, hidden_sizes, out_features, dropout_rate=0, get_confidence=True).to(device)
-    tabM_naive = luc.EnsembleModel(luc.TabM_naive, in_features, hidden_sizes, out_features, dropout_rate=0, get_confidence=True).to(device)
-    tabM_mini = luc.EnsembleModel(luc.TabM_mini, in_features, hidden_sizes, out_features, dropout_rate=0, get_confidence=True).to(device)
-    tabM = luc.EnsembleModel(luc.TabM, in_features, hidden_sizes, out_features, dropout_rate=0, get_confidence=True).to(device)
+    mlpk = luc.EnsembleModel(luc.MLPk, in_features, hidden_sizes, out_features, dropout_rate=0).to(device)
+    tabM_naive = luc.EnsembleModel(luc.TabM_naive, in_features, hidden_sizes, out_features, dropout_rate=0).to(device)
+    tabM_mini = luc.EnsembleModel(luc.TabM_mini, in_features, hidden_sizes, out_features, dropout_rate=0).to(device)
+    tabM = luc.EnsembleModel(luc.TabM, in_features, hidden_sizes, out_features, dropout_rate=0).to(device)
 
-    train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine_quality/luc/MLP", device)
-    train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine_quality/luc/MLPk", device, log_confidence=True)
-    train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine_quality/luc/TabM_naive", device, log_confidence=True)
-    train_multiclass_classification(tabM_mini, train_loader, test_loader, "runs/wine_quality/luc/TabM_mini", device, log_confidence=True)
-    train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine_quality/luc/TabM", device, log_confidence=True)
+    # train_multiclass_classification(mlp, train_loader, test_loader, "runs/wine_quality/luc/MLP", device, ood_loader=ood_loader)
+    # train_multiclass_classification(mlpk, train_loader, test_loader, "runs/wine_quality/luc/MLPk", device, ood_loader=ood_loader)
+    # train_multiclass_classification(tabM_naive, train_loader, test_loader, "runs/wine_quality/luc/TabM_naive", device, ood_loader=ood_loader)
+    # train_multiclass_classification(tabM_mini, train_loader, test_loader, "runs/wine_quality/luc/TabM_mini", device, ood_loader=ood_loader)
+    # train_multiclass_classification(tabM, train_loader, test_loader, "runs/wine_quality/luc/TabM", device, ood_loader=ood_loader)
 
     # ===== Weighted Models =====
 
@@ -85,7 +96,7 @@ if __name__ == "__main__":
     tabM_weighted = luc.EnsembleModel(luc.TabM, in_features, hidden_sizes, out_features, dropout_rate=0,
                                       get_confidence=True, head_aggregation="weighted").to(device)
 
-    train_multiclass_classification(mlpk_weighted, train_loader, test_loader, "runs/wine_quality/luc/MLPk_weighted", device, log_confidence=True)
-    train_multiclass_classification(tabM_naive_weighted, train_loader, test_loader, "runs/wine_quality/luc/TabM_naive_weighted", device, log_confidence=True)
-    train_multiclass_classification(tabM_mini_weighted, train_loader, test_loader, "runs/wine_quality/luc/TabM_mini_weighted", device, log_confidence=True)
-    train_multiclass_classification(tabM_weighted, train_loader, test_loader, "runs/wine_quality/luc/TabM_weighted", device, log_confidence=True)
+    train_multiclass_classification(mlpk_weighted, train_loader, test_loader, "runs/wine_quality/luc/MLPk_weighted", device, log_confidence=True, ood_loader=ood_loader)
+    train_multiclass_classification(tabM_naive_weighted, train_loader, test_loader, "runs/wine_quality/luc/TabM_naive_weighted", device, log_confidence=True, ood_loader=ood_loader)
+    train_multiclass_classification(tabM_mini_weighted, train_loader, test_loader, "runs/wine_quality/luc/TabM_mini_weighted", device, log_confidence=True, ood_loader=ood_loader)
+    train_multiclass_classification(tabM_weighted, train_loader, test_loader, "runs/wine_quality/luc/TabM_weighted", device, log_confidence=True, ood_loader=ood_loader)

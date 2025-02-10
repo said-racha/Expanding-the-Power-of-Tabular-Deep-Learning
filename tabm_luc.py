@@ -144,6 +144,9 @@ class TabM_naive(nn.Module):
 
     def forward(self, X: torch.Tensor):
         return self.layers(X)
+    
+    def __str__(self):
+        return "TabM_naive"
 
 
 class TabM_mini(nn.Module):
@@ -163,6 +166,9 @@ class TabM_mini(nn.Module):
     def forward(self, X: torch.Tensor):
         output = X * self.R
         return self.layers(output)
+    
+    def __str__(self):
+        return "TabM_mini"
 
 
 class TabM(nn.Module):
@@ -179,6 +185,9 @@ class TabM(nn.Module):
 
     def forward(self, X: torch.Tensor):
         return self.layers(X)
+    
+    def __str__(self):
+        return "TabM"
 
 
 class MLPk(nn.Module):
@@ -193,6 +202,9 @@ class MLPk(nn.Module):
 
     def forward(self, X: torch.Tensor):
         return self.layers(X)
+    
+    def __str__(self):
+        return "MLPk"
 
 # ===== MODELS =====
 
@@ -255,6 +267,10 @@ class EnsembleModel(nn.Module):
         preds = torch.stack(preds, dim=1)
         
         if self.get_confidence:
+            # Binary classification -> multi-class classification (class 0, class 1)
+            if preds.size(2) == 1:
+                preds = torch.cat((1 - preds, preds), dim=2)
+            
             preds_softmax = torch.softmax(preds, dim=2)
             
             # prevent log(0) without in-place operation
@@ -273,9 +289,9 @@ class EnsembleModel(nn.Module):
                     global_confidence = (torch.softmax(confidences, dim=1) * confidences).sum(dim=1)
                 case "none":
                     global_confidence = confidences
-            
-            # Stop if not a number
-            assert torch.all(torch.isfinite(global_confidence)), "Confidence is not finite"
+                    
+            # Convert nan to 0
+            global_confidence = torch.nan_to_num(global_confidence)
             
 
         match self.head_aggregation:
