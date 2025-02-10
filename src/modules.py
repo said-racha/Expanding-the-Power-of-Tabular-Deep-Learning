@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class linear_BE(nn.Module):
+class Linear_BE(nn.Module):
     """
     Linear layer with Batch Embedding
     """
@@ -186,3 +186,141 @@ class AttentionBlock(nn.Module):
         X = X + self.dropout2(ffn_output)  # Add residual connections
         X = self.norm2(X)
         return X
+
+
+class NonLinearBE(nn.Module):  # BatchEnsemble layer with non-linear transformations
+    def __init__(self, dim_in: int, dim_out: int, k=32, init="uniform", amplitude_init=1.0, activation_RS=torch.tanh):
+        super().__init__()
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+        self.k = k
+        self.activation_RS = activation_RS  # Allow passing a custom activation function
+
+        self.R = nn.Parameter(torch.Tensor(k, dim_in))
+        self.W = nn.Parameter(torch.Tensor(dim_in, dim_out))
+        self.S = nn.Parameter(torch.Tensor(k, dim_out))
+        self.B = nn.Parameter(torch.Tensor(k, dim_out))
+
+        if init == "uniform":
+            nn.init.uniform_(self.R, -1, 1)
+            nn.init.uniform_(self.S, -1, 1)
+
+        elif init == "ones":
+            nn.init.ones_(self.R)
+            nn.init.normal_(self.S)
+
+        elif init == "normal":
+            nn.init.normal_(self.S)
+            nn.init.normal_(self.R)
+
+        elif init == "laplace":
+            dist = torch.distributions.laplace.Laplace(torch.tensor([0.0]), torch.tensor([1.0]))
+            self.R.data = dist.sample((k, dim_in))[:, :, 0]
+            self.S.data = dist.sample((k, dim_out))[:, :, 0]
+
+        else:
+            raise ValueError("init should be 'uniform', 'normal', 'ones' or 'laplace'")
+
+        self.R.data *= amplitude_init
+        self.S.data *= amplitude_init
+
+        nn.init.normal_(self.W)
+        nn.init.normal_(self.B)
+
+    def forward(self, X):
+        """
+        Non-linear version of BatchEnsemble transformation.
+        """
+        # Element-wise multiplication of X and non-linearly transformed R
+        transformed_R = self.activation_RS(self.R)
+        output = torch.mul(X, transformed_R)  # (batch_size, k, dim_in)
+
+        # Matrix multiplication with W
+        output = torch.einsum("bki,io->bko", output, self.W)  # (batch_size, k, dim_out)
+
+        # Apply non-linear transformation on S and multiply element-wise, add B
+        transformed_S = self.activation_RS(self.S)
+        output = output * transformed_S + self.B  # (batch_size, k, dim_out)
+
+        return output
+
+
+class PiecewiseLinearEncoding(nn.Module):
+    # YuryGorishniy, IvanRubachev,andArtemBabenko (2022).
+    # "On embeddings for numerical features in tabular deep learning." In NeurIPS
+    # https://arxiv.org/abs/2203.05556
+
+    def __init__(self, num_bins=10):
+        """
+        PLE module for encoding numerical features.
+
+        Args:
+        - num_bins (int): Number of bins T for piecewise encoding.
+        """
+        super().__init__()
+        self.num_bins = num_bins
+        self.bin_edges = None  # To be initialized during fit or passed as input
+
+    def fit_bins(self, x):
+        self.bin_edges = []
+        num_features = x.shape[1]
+
+        for i in range(num_features):
+            feature_values = x[:, i]  # Extraire les valeurs pour la ième feature
+
+            bins = torch.quantile(feature_values, torch.linspace(0, 1, self.num_bins))  # Diviser selon les quantiles
+            self.bin_edges.append(bins)
+
+        self.bin_edges = [bins.to(x.device) for bins in self.bin_edges]
+
+    def forward(self, x):
+        """
+        x: shape (batch, d), où d est le nombre de features.
+        Return : Tensor de forme (batch, d * num_bins)
+        """
+        if self.bin_edges is None:
+            self.fit_bins(x)
+
+        batch_size, num_features = x.shape
+
+        # Stocker les résultats pour chaque feature
+        encoded_features = []
+
+        for i in range(num_features):
+            feature_values = x[:, i]  # Extraire une feature (batch,)
+
+            # Calculer les encodages PLE pour cette feature
+            bins = self.bin_edges[i]  # Bins spécifiques à la ième feature
+            ple_values = torch.zeros((batch_size, self.num_bins), device=x.device)
+
+            for t in range(1, self.num_bins):
+                bt_minus1 = bins[t - 1]
+                bt = bins[t]
+
+                # Cas 1 : Valeurs avant le bin
+                ple_values[:, t] = torch.where(
+                    (feature_values < bt_minus1) & (t > 0),
+                    torch.tensor(0.0, device=x.device),
+                    ple_values[:, t]
+                )
+
+                # Cas 2 : Valeurs après le bin
+                ple_values[:, t] = torch.where(
+                    (feature_values >= bt) & (t < self.num_bins - 1),
+                    torch.tensor(1.0, device=x.device),
+                    ple_values[:, t]
+                )
+
+                # Cas 3 : Encodage proportionnel
+                ple_values[:, t] = torch.where(
+                    (feature_values >= bt_minus1) & (feature_values < bt),
+                    (feature_values - bt_minus1) / (bt - bt_minus1 + 1e-9),
+                    ple_values[:, t]
+                )
+
+            encoded_features.append(ple_values)
+
+        # Concaténer les encodages de toutes les features
+        encoded_output = torch.cat(encoded_features, dim=1)  # (batch, d * num_bins)
+
+        return encoded_output

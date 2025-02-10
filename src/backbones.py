@@ -25,7 +25,7 @@ class TabM_naive(nn.Module):
 
         layer_sizes = [in_features] + hidden_sizes
 
-        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k, dropout_rate) for i in range(len(layer_sizes)-1)]
+        layers = [Linear_BE(layer_sizes[i], layer_sizes[i+1], k, dropout_rate) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 
@@ -82,7 +82,7 @@ class TabM(nn.Module):
 
         layer_sizes = [in_features] + hidden_sizes
 
-        layers = [linear_BE(layer_sizes[i], layer_sizes[i+1], k, dropout_rate, initialize_to_1=True) for i in range(len(layer_sizes)-1)]
+        layers = [Linear_BE(layer_sizes[i], layer_sizes[i+1], k, dropout_rate, initialize_to_1=True) for i in range(len(layer_sizes)-1)]
 
         self.layers = nn.Sequential(*layers)
 

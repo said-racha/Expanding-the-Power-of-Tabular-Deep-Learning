@@ -44,7 +44,6 @@ class EnsembleModel(nn.Module):
 
     def __init__(self, backbone: nn.Module, in_features: int, hidden_sizes: int, out_features: int, k=32, dropout_rate=0.1, head_aggregation: {"mean", "conf", "none"}="mean", get_confidence=False):
         """
-
         :param nn.Module backbone: backbone used for the model
         :param int in_features: input dimension
         :param list[int] hidden_sizes: hidden layer sizes
@@ -151,7 +150,7 @@ class TabMWithAttention(nn.Module):
         # BatchEnsemble Layers
         layer_sizes = [embed_dim] + hidden_sizes
         self.tabm_layers = nn.Sequential(
-            *[linear_BE(layer_sizes[i], layer_sizes[i + 1], k, dropout_rate, initialize_to_1=True) for i in range(len(layer_sizes) - 1)]
+            *[Linear_BE(layer_sizes[i], layer_sizes[i + 1], k, dropout_rate, initialize_to_1=True) for i in range(len(layer_sizes) - 1)]
         )
 
         self.output_layer = nn.Linear(hidden_sizes[-1], output_dim)  # Aggregate predictions for k outputs
@@ -180,3 +179,88 @@ class TabMWithAttention(nn.Module):
         X = X.mean(dim=1)  # Aggregate k outputs, out: (batch_size, 1)
 
         return X
+
+
+class NonLinearTabM(nn.Module):
+    def __init__(self, layers_shapes: list, k=32, mean_over_heads=True, init="uniform", amplitude=1.0, intermediaire=False, activationRS=torch.tanh):
+        super().__init__()
+
+        self.k = k
+        self.intermediaire = intermediaire
+
+        self.layers = torch.nn.ModuleList([NonLinearBE(layers_shapes[0], layers_shapes[1], k, init="ones", activation_RS=activationRS),
+                                          torch.nn.ReLU(),
+                                          torch.nn.Dropout(0.1)])
+
+        for i in range(1, len(layers_shapes)-2):
+            self.layers.append(NonLinearBE(layers_shapes[i], layers_shapes[i+1], k, init, amplitude, activation_RS=activationRS))
+            self.layers.append(torch.nn.ReLU())
+            self.layers.append(torch.nn.Dropout(0.1))
+
+        self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-2], layers_shapes[-1]) for _ in range(k)])
+        self.mean_over_heads = mean_over_heads
+
+    def forward(self, x):
+        X = x.unsqueeze(1).repeat(1, self.k, 1)
+
+        intermediaire = []
+
+        for layer in self.layers:
+            X = layer(X)
+
+            if (isinstance(layer, NonLinearBE) or isinstance(layer, nn.Linear)) and self.intermediaire:
+                intermediaire.append(X)
+
+        if intermediaire:
+            return intermediaire
+
+        # predictions
+        preds = torch.stack([head(X[:, i]) for i, head in enumerate(self.pred_heads)], dim=1)
+
+        if self.mean_over_heads:
+            return preds.mean(dim=1)
+        return preds
+
+
+class TabM_with_PLE(nn.Module):
+    def __init__(self, layers_shapes, k=32, mean_over_heads=True, init="uniform", amplitude=1.0, num_bins=10):
+        super().__init__()
+
+        self.k = k
+
+        # Module PLE pour encoder les features numériques
+        self.ple = PiecewiseLinearEncoding(num_bins=num_bins)
+
+        # Reste du modèle TabM
+        self.layers = nn.ModuleList([Linear_BE(layers_shapes[0], layers_shapes[1], k, init="ones"),
+                                     nn.ReLU(),
+                                     nn.Dropout(0.1)])
+
+        for i in range(1, len(layers_shapes) - 2):
+            self.layers.append(Linear_BE(layers_shapes[i], layers_shapes[i + 1], k, init, amplitude))
+            self.layers.append(nn.ReLU())
+            self.layers.append(nn.Dropout(0.1))
+
+        self.pred_heads = nn.ModuleList([nn.Linear(layers_shapes[-2], layers_shapes[-1]) for _ in range(k)])
+        self.mean_over_heads = mean_over_heads
+
+    def fit_bins(self, x):
+        """Appelle fit_bins pour initialiser les bins du PLE."""
+        self.ple.fit_bins(x)
+
+    def forward(self, x):
+        # Encodage PLE
+        x_encoded = self.ple(x)
+
+        # Réplication des inputs encodés pour chaque "head"
+        X = x_encoded.unsqueeze(1).repeat(1, self.k, 1)
+
+        # Forward pass à travers les couches du modèle
+        for layer in self.layers:
+            X = layer(X)
+
+        # Prédictions
+        preds = torch.stack([head(X[:, i]) for i, head in enumerate(self.pred_heads)], dim=1)
+        if self.mean_over_heads:
+            return preds.mean(dim=1)
+        return preds
