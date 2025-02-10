@@ -7,6 +7,8 @@ from sklearn.datasets import load_breast_cancer, fetch_openml, fetch_california_
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 import pandas as pd
+import numpy as np
+from ucimlrepo import fetch_ucirepo
 
 #***************************************************** MODELS ***************************************************************#
 # ===== LAYERS =====
@@ -301,20 +303,20 @@ class AttentionBlock(nn.Module):
         X = self.norm2(X)
         return X
 
-# Define the TabM model with Attention
+
 class TabMWithAttention(nn.Module):
     def __init__(self, in_features, hidden_sizes, embed_dim, output_dim=1, num_heads=4, k=32, dropout_rate=0.1):
         """
         Initialize the TabMWithAttention model.
 
         Args:
-            in_features (int): Number of input features.
-            hidden_sizes (list of int): Sizes of the hidden layers.
-            embed_dim (int): Dimensionality of the embedding space.
-            output_dim (int): Dimensionality of the output space. Default is 1.
-            num_heads (int): Number of attention heads. Default is 4.
-            k (int): Number of ensemble components for BatchEnsemble layers. Default is 32.
-            dropout_rate (float): Dropout rate for regularization. Default is 0.1.
+            in_features : Number of input features.
+            hidden_sizes: Sizes of the hidden layers.
+            embed_dim : Dimensionality of the embedding space.
+            output_dim : Dimensionality of the output space.
+            num_heads : Number of attention heads.
+            k : Number of ensemble components for BatchEnsemble layers.
+            dropout_rate : Dropout rate for regularization.
         """
         super().__init__()
         self.k = k
@@ -353,7 +355,7 @@ class TabMWithAttention(nn.Module):
 
         # TabM layers
         X = self.tabm_layers(X)  # out: (batch_size, k, hidden_size[-1])
-        X = self.output_layer(X)  # out: (batch_size, k, 1)
+        X = self.output_layer(X)  # out: (batch_size, k, output_dim)
         X = X.mean(dim=1)  # Aggregate k outputs, out: (batch_size, 1)
 
         return X
@@ -548,21 +550,65 @@ def get_iris_data(split=0.2, batch_size=32, seed=42):
     return train_loader, test_loader, shape_x, shape_y
 
 
+def get_quality_wine_data(split=.2, batch_size=32, seed=42):
+    """
+    Loads the Wine Quality dataset into dataloaders.
+    """
+
+    wine_quality = fetch_ucirepo(id=186)
+
+    X = wine_quality.data.features
+    y = wine_quality.data.targets
+
+    # Normalize
+    X = (X - X.mean(axis=0)) / X.std(axis=0)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split, random_state=seed, stratify=y)
+
+    # Remap the labels to be in the range [0, num_classes - 1]
+    unique_labels = np.unique(y)
+    label_mapping = {label: i for i, label in enumerate(unique_labels)}
+
+    # Convert y_train and y_test to Series if they are DataFrames
+    if isinstance(y_train, pd.DataFrame):
+        y_train = y_train.squeeze()
+    if isinstance(y_test, pd.DataFrame):
+        y_test = y_test.squeeze()
+
+    y_train = y_train.map(label_mapping)
+    y_test = y_test.map(label_mapping)
+
+    # Dataloaders
+    train_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(torch.tensor(X_train.to_numpy()).float(), torch.tensor(y_train.to_numpy()).long().squeeze()),
+        batch_size=batch_size, shuffle=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(torch.tensor(X_test.to_numpy()).float(), torch.tensor(y_test.to_numpy()).long().squeeze()),
+        batch_size=batch_size, shuffle=False
+    )
+
+    shape_x = X_train.shape[1]
+    shape_y = len(np.unique(y))  # Number of classes
+
+    return train_loader, test_loader, shape_x, shape_y
+
 #========== Main function ==========#
 
-def main():
+if __name__ == "__main__":
     BATCH_SIZE = 32
     device = initialize_device()
 
-    # Load datasets and perform pruning and training for each
     datasets = [
-        ("breast_cancer", get_breast_cancer_data, "binary", 1e-4, 25),
-        ("adult_income", get_adult_income_data, "binary", 1e-4, 15),
-        ("california_housing", get_california_housing_data, "regression", 1e-4, 20),
-        ("iris", get_iris_data, "multiclass", 1e-4, 60)
+        # format : dataset_name, loader_func, task_type, lr, nb_epochs,embed_dim, num_heads
+        ("breast_cancer", get_breast_cancer_data, "binary", 1e-4, 26, 24, 4),
+        ("adult_income", get_adult_income_data, "binary", 1e-4, 20, 48, 6),
+        ("california_housing", get_california_housing_data, "regression", 1e-7, 12, 10, 1),
+        ("iris", get_iris_data, "multiclass", 1e-4, 85, 24, 4),
+        ("wine_quality", get_quality_wine_data, "multiclass", 1e-2, 45, 192, 16)
     ]
 
-    for dataset_name, loader_func, task_type, lr, nb_epochs in datasets:
+    for dataset_name, loader_func, task_type, lr, nb_epochs, embed_dim, num_heads in datasets:
         print(f"\n\n *** Processing {dataset_name} dataset...")
         train_loader, test_loader, shape_x, shape_y = loader_func(split=0.2, batch_size=BATCH_SIZE, seed=42)
 
@@ -591,8 +637,8 @@ def main():
         tabM = EnsembleModel(TabM, input_dim, hidden_sizes, output_dim, dropout_rate=0).to(device)
         mlpk = EnsembleModel(MLPk, input_dim, hidden_sizes, output_dim, dropout_rate=0).to(device)
 
-        embed_dim = 12
-        tabM_attention = TabMWithAttention(input_dim, hidden_sizes, embed_dim, output_dim=output_dim, num_heads=2, k=32, dropout_rate=0.3).to(device)
+        embed_dim = embed_dim
+        tabM_attention = TabMWithAttention(input_dim, hidden_sizes, embed_dim, output_dim=output_dim, num_heads=num_heads, k=32, dropout_rate=0.3).to(device)
 
         NB_ITER = nb_epochs
 
@@ -604,6 +650,3 @@ def main():
         train_model(mlpk, train_loader, test_loader, 'runs/'+dataset_name+'/MLPk', device,  task_type=task_type, nb_iter=NB_ITER)
         train_model(tabM_attention, train_loader, test_loader, 'runs/'+dataset_name+'/TabM_Attention', device,  task_type=task_type, nb_iter=NB_ITER)
 
-# Run the main function
-if __name__ == "__main__":
-    main()
