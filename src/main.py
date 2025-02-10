@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch import nn
 
+# Fetch these from GitHub
 # import excel_former
 # import ft_transformer
 # import t2g_former

@@ -172,7 +172,7 @@ def full_test_classif(models: list, model_names: list, layers, get_data, f_train
     couches = [shape_x] + layers + [shape_y]
     for scale in perturbation_scales:
         for dist in distributions:
-            model = raph.TabM(
+            model = models.TabM(
                 couches,
                 amplitude=scale,
                 init=dist
@@ -250,7 +250,7 @@ def full_test_reg(models: list, model_names: list, layers, get_data, f_train, de
     couches = [shape_x] + layers + [shape_y]
     for scale in perturbation_scales:
         for dist in distributions:
-            model = raph.TabM(
+            model = models.TabM(
                 couches,
                 amplitude=scale,
                 init=dist
@@ -283,8 +283,9 @@ def full_test_reg(models: list, model_names: list, layers, get_data, f_train, de
 
 
 if __name__ == "__main__":
-    from test_wine import train_multiclass_classification
-    from test_wine_quality import get_quality_wine_data
+    from datasets import get_quality_wine_data
+    from training import train_multiclass_classification
+    
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
